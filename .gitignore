@@ -1,0 +1,16 @@
+# 运行时数据：数据库 / 密钥配置 / 上传文件 / 日志
+data/
+# 前端依赖与构建产物
+node_modules/
+frontend/dist/
+# Python
+__pycache__/
+*.pyc
+.venv/
+# 本地环境杂物
+*.log
+.DS_Store
+# 会话工作产物（探针脚本/测试报告/GUI 截图）
+work/
+gui-test-screenshots/
+.pytest_cache/

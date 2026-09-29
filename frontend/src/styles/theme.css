@@ -1,0 +1,48 @@
+/* 暗绿主题：沿用 1.0 配色（styles.css :root），叠加 Element Plus 暗色变量覆写 */
+:root {
+  --bg: #0c1210;
+  --surface: #141f1a;
+  --border: #243830;
+  --text: #e8f0ec;
+  --muted: #8fa89a;
+  --accent: #2dd4a8;
+  --accent-dim: #1a9e7a;
+  --user-bg: #1a4a3d;
+  --assistant-bg: #1a2420;
+}
+
+html.dark {
+  --el-bg-color: var(--surface);
+  --el-bg-color-page: var(--bg);
+  --el-bg-color-overlay: #18241e;
+  --el-fill-color-blank: var(--surface);
+  --el-border-color: var(--border);
+  --el-border-color-light: var(--border);
+  --el-border-color-lighter: #1d2e27;
+  --el-text-color-primary: var(--text);
+  --el-text-color-regular: #c4d6cc;
+  --el-text-color-secondary: var(--muted);
+  --el-color-primary: var(--accent);
+  --el-color-primary-light-3: #24b18c;
+  --el-color-primary-light-5: #1d8f72;
+  --el-color-primary-light-7: #176854;
+  --el-color-primary-light-8: #144f41;
+  --el-color-primary-light-9: #10372e;
+  --el-color-primary-dark-2: #4ce0bc;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(45, 212, 168, 0.12), transparent);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}

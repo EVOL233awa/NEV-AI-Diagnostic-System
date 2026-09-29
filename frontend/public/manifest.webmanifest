@@ -1,0 +1,31 @@
+{
+  "name": "新能源汽车 AI 智能诊断系统 2.0",
+  "short_name": "AI 诊断",
+  "description": "新能源汽车 AI 智能诊断助手：查证据、给结论、可预约进店",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e1626",
+  "theme_color": "#0e1626",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
