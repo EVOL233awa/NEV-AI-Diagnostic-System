@@ -97,6 +97,8 @@ https://nev.evoidngc.top
 
 Demo accounts (initial password = username): user001 (owner) · staff001 (staff) · admin (admin)
 
+Full walkthrough for all four roles (owner / staff / admin / superadmin): [User Guide](docs/操作指南.md) (Chinese).
+
 ## Quick Start
 
 Requirements: Python 3.10+ (developed on 3.12), Node.js 18+; optional OpenAI-compatible embedding / lightweight-chat endpoints (e.g. llama.cpp llama-server, see the `local_models` notes below). Everything can also be left empty — semantic retrieval degrades to keyword retrieval and async extraction is skipped.

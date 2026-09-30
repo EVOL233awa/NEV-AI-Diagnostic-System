@@ -97,6 +97,8 @@ https://nev.evoidngc.top
 
 演示账号（初始密码 = 账号名）：user001（车主）· staff001（店员）· admin（管理员）
 
+各端（车主 / 店员 / 管理员 / superadmin）的完整操作说明见 [操作指南](docs/操作指南.md)。
+
 ## 快速开始
 
 环境要求：Python 3.10+（开发验证于 3.12）、Node.js 18+；可选 OpenAI 兼容嵌入 / 轻量对话端点（如 llama.cpp llama-server，配置见下文 `local_models` 说明），全部留空亦可运行（语义检索退化为关键词检索、异步抽取跳过）。
