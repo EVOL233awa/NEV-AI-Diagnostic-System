@@ -36,5 +36,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 纯前端原型：单页应用（HTML/CSS/Vanilla JS）在浏览器内直接调用 LLM API，API Key 与会话记录存于 localStorage；内置静态知识库 + 场景识别 + 规则引擎提供检索问答；含「预约检修引导」占位入口。
 
-[2.0.0]: https://github.com/EVOL233awa/新能源汽车-AI-智能诊断系统/compare/v1.0...v2.0.0
-[1.0.0]: https://github.com/EVOL233awa/新能源汽车-AI-智能诊断系统/releases/tag/v1.0
+[2.0.0]: https://github.com/EVOL233awa/NEV-AI-Diagnostic-System/compare/v1.0...v2.0.0
+[1.0.0]: https://github.com/EVOL233awa/NEV-AI-Diagnostic-System/releases/tag/v1.0
