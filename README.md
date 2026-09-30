@@ -1,8 +1,10 @@
 # 新能源汽车 AI 智能诊断系统 2.0
 
-> AI-powered New Energy Vehicle Diagnostic Assistant · 车主 / 店员 / 管理员三端一体的 Agentic RAG 诊断系统
+> AI-powered New Energy Vehicle Diagnostic Assistant · 车主 / 店员 / 管理员三端一体的 Agentic RAG 诊断系统 + 部署者专属 superadmin 调试后台
 
-面向新能源汽车维修场景的多角色智能诊断平台：车主通过多轮对话获得结构化诊断结论并一键预约到店；店员在工单闭环中接单、回填、沉淀案例；管理员掌握成员、统计与审计。1.0（纯前端单端工具）的整体重构版本，版本间差异详见 [CHANGELOG.md](CHANGELOG.md)。
+**简体中文** · [English](README_EN.md)
+
+面向新能源汽车维修场景的多角色智能诊断平台：车主通过多轮对话获得结构化诊断结论并一键预约到店；店员在工单闭环中接单、回填、沉淀案例；管理员掌握成员、统计与审计；部署者另有 superadmin 调试后台，在线运维模型供应商与 Agent 运行参数。1.0（纯前端单端工具）的整体重构版本，版本间差异详见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 架构总览
 
@@ -18,7 +20,7 @@ flowchart TB
     subgraph backend["FastAPI 单进程（main.py :8600）"]
         GW["<b>/api/* 网关</b><br/>JWT 鉴权 · SPA fallback<br/>HTTPS 同源托管 · 域名直达"]
         AG["<b>Agentic RAG 诊断系统</b><br/>kb_search / dtc_lookup / web_search<br/>车辆档案 · ask_user"]
-        RAG["<b>知识库检索</b><br/>向量 + 关键词双路融合<br/>内置知识库 300+ 条"]
+        RAG["<b>知识库检索</b><br/>向量主路 + 关键词降级<br/>内置知识库 300+ 条"]
         DB[("SQLite · 审计日志")]
         SA["<b>/api/superadmin 配置</b><br/>Key 单向掩码 · 测试连接"]
         CFG[("data/config.json<br/>模型配置 · 密钥宿主")]
@@ -55,12 +57,12 @@ flowchart TB
     style deps fill:#14161c,stroke:#4b5563,color:#9aa4b2
 ```
 
-整个系统按**四模型分工**运行：主聊天模型（Agentic 诊断对话）、上下文压缩模型（可选，地址与 Key 缺省自动跟随主对话配置）、向量化模型（知识库语义检索）、本地小模型（可选，诊断状态卡抽取与会话标题）。四个槽位的地址 / 模型 / Key 均在 superadmin 后台在线配置、保存即热生效。任一环节不可用只降级不中断：压缩失败只保留最近几轮，向量化模型不可用时检索自动退化为纯关键词检索，本地小模型不可用时自动跳过抽取与标题生成。
+整个系统按**四模型分工**运行：主聊天模型（Agentic 诊断对话）、上下文压缩模型（可选，地址与 Key 缺省自动跟随主对话配置）、向量化模型（知识库语义检索）、本地小模型（可选，诊断状态卡抽取与会话标题）。四个槽位的地址 / 模型 / Key 均在 superadmin 后台在线配置、保存即热生效。任一环节不可用只降级不中断：压缩失败只保留最近几轮，向量化模型不可用时检索自动退化为纯关键词检索，本地小模型不可用时自动跳过抽取与标题生成。各模块的详细设计与决策依据见 [技术架构设计文档](docs/技术架构设计.md)。
 
 ## 核心特性
 
 - **Agentic 诊断对话**：DeepSeek function calling 驱动 Agent 循环（工具调用最多 6 轮、每轮最多追问 3 次，防止对话失控）；AI 的查证过程以时间线形式展示；输出结构化诊断卡（🟢🟡🔴 严重度 + 可能原因 + 检修步骤 + 待确认项）。
-- **Agentic RAG 检索**：知识导入时按文档结构智能分段；检索时同时走 bge-m3 向量匹配与 jieba/BM25 关键词匹配，两路结果自动融合排序。内置知识库 300+ 条（OBD-II 故障码表 195 条 + 电池/电机/电控知识 105 条，全部标注来源）；用 20 个典型故障问题实测，正确答案出现在前 3 条结果的比例为 95%，并附一键自检脚本（`python -m backend.rag.eval_gate`）。
+- **Agentic RAG 检索**：知识导入时按文档结构智能分段；检索以 bge-m3 向量为主路（实测显著优于双路融合排序），向量路不可用或零召回时自动降级 jieba/BM25 关键词路，服务不中断。内置知识库 300+ 条（OBD-II 故障码表 195 条 + 电池/电机/电控知识 105 条，全部标注来源）；检索质量由红绿闸门守护——50 个典型故障问题实测 top-3 命中率 100%（门槛 80%），注入故障模式（禁用向量路 / 噪声向量 / 乱序）必须下降 ≥15% 见红，固定种子可复现，一键自检（`python -m backend.rag.eval_gate`）。
 - **受控追问**：AI 信息不足时以卡片列出问题，车主点选或自由填写，「不知道 / 不清楚」兜底不卡流程；未回答的提问会随会话保存，支持离线续答。
 - **上下文压缩与三层记忆**：对话超过 20 轮或超出 token 预算时，自动把早期内容压缩成摘要（压缩失败则只保留最近几轮）；记忆分三层——会话内的诊断状态卡、跨会话的车辆档案（默认车自动带入）、店员沉淀的维修案例（案例自动记录入库，纳入后续诊断的检索范围）。
 - **预约闭环**：诊断卡一键预约（自动附带诊断摘要）→ 店员接单 / 改约 → 回填维修结果 → 一键沉淀案例 → HTML 打印报告（另存 PDF）；状态机强约束 + 30s 新单轮询提醒。
@@ -79,7 +81,7 @@ flowchart TB
 
 ![车主端 AI 诊断对话](docs/screenshots/chat-diagnosis.png)
 
-管理端知识库检索测试台：向量（bge-m3）与关键词（jieba/BM25）双路融合排序，命中结果标注来源与得分：
+管理端知识库检索测试台：命中结果标注来源（向量 / 关键词）与得分：
 
 ![知识库检索测试台](docs/screenshots/kb-retrieval.png)
 
@@ -89,13 +91,15 @@ superadmin 调试后台（仅部署者）：在线修改模型供应商四槽位
 
 ## 在线体验
 
-云服务器同源直达（FastAPI :8600 · Cloudflare 隧道）：
+阿里云 ECS + Cloudflare 隧道同源直达（FastAPI :8600）：
 
 https://nev.evoidngc.top
 
+演示账号（初始密码 = 账号名）：user001（车主）· staff001（店员）· admin（管理员）
+
 ## 快速开始
 
-环境要求：Python 3.10+（开发验证于 3.12）、Node.js 18+；可选 llama.cpp llama-server（加载 bge-m3 嵌入模型与 ornith-1.5-9b-mtp-iq4xs 本地小模型）。
+环境要求：Python 3.10+（开发验证于 3.12）、Node.js 18+；可选 OpenAI 兼容嵌入 / 轻量对话端点（如 llama.cpp llama-server，配置见下文 `local_models` 说明），全部留空亦可运行（语义检索退化为关键词检索、异步抽取跳过）。
 
 ```bash
 # 1) 后端依赖
@@ -138,14 +142,14 @@ python -m backend.seed.load_corpus
 ```
 
 - 三把 API Key 只存该文件：**不进仓库、不下发前端、不写日志**；`data/` 已在 `.gitignore`。
-- `local_models` 指向 llama.cpp llama-server 实例（留空则对应能力自动降级）：`:11436` 加载 bge-m3 提供 `/v1/embeddings`；`:11435` 加载 ornith-1.5-9b-mtp-iq4xs 用于诊断状态卡抽取与会话标题生成。
+- `local_models`（可选）指向 OpenAI 兼容 HTTP 服务，留空则对应能力自动降级：`embedding_url` 为向量化服务（提供 `/v1/embeddings`），可填本地 llama.cpp llama-server（模板中的 `:11436` 为示例值，加载 bge-m3 等嵌入模型），也可直接填云端嵌入 API（如硅基流动，配合 `embedding_model` / `embedding_key` 携带 Bearer 认证）；`subagent_url` 为轻量对话模型端点，承担诊断状态卡抽取与会话标题生成两项异步任务，不可用自动跳过；`rerank_url` 为重排服务（可选，默认不启用）。
 - Tavily Key 缺失或失效时 `web_search` 工具自动禁用，其余功能不受影响。
 - `cors_origins` 可选，缺省白名单见 `backend/config.py`（生产域名 + 本机开发/直连端口）。同源部署（访问域名即系统）浏览器不触发 CORS，无需配置；仅前端与后端跨源调试时才需要。
 - 后台压缩槽位可精简：`background_base_url` / `background_key` 省略时自动沿用主对话的地址与 Key；`background_model` 缺省 `deepseek-flash`，填与主模型同名即由主聊天模型兼任。
 
 ### 演示账号与首次部署
 
-首次启动自动创建管理员 / 店员 / 车主三种角色的演示账号（账号名与初始密码见 `backend/seed/seed.py`，初始密码 = 账号名），仅为演示便利：
+首次启动自动创建与「在线体验」相同的三种角色演示账号，仅为演示便利：
 
 > ⚠️ 正式部署后请立即让各账号通过「设置 → 修改密码」更换初始密码。改密码接口强制强度校验（至少 8 位、须含字母和数字、不得包含账号名），且改密码通道不允许回退到「密码 = 账号名」的弱口令。
 
@@ -217,7 +221,7 @@ backend/
   seed/                  演示账号 + 演示车辆 + 内置知识库（corpus/）
   app.py                 应用工厂（CORS + 静态托管 + SPA fallback）
 frontend/                Vue 3 + TypeScript + Vite + Element Plus
-tests/                   pytest 回归套件（69 例）
+tests/                   pytest 回归套件（84 例）
 data/                    运行时生成：config.json / data.db / logs/（不入库）
 ```
 
