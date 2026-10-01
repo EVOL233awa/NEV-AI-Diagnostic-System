@@ -3,7 +3,8 @@
 - 云端 bge-m3 实测纯向量路显著优于双路 RRF 融合（eval_gate：vec_only 100% vs 融合 85%），
   BM25 在当前语料上是负贡献，故健康路径只走向量路（eval_gate.py 同批注释）。
 - 向量路不可达（嵌入服务挂 / 扩展缺失）或零召回时，自动退化为 BM25 关键词路，服务不中断。
-- 重排默认关（bge-reranker-base 复测不合格），预留 rerank 钩子。
+- 重排：云端 bge-reranker-v2-m3 对 top_k 结果精排（2026-10-02 实测定参，见 reranker.py
+  模块注释）；未配置 rerank_url 或重排失败时静默保持原序，显式传入 reranker 参数可覆盖。
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from backend.db.models import KbChunk, KbDocument
 from backend.rag import vecstore
 from backend.rag.bm25 import bm25_index
 from backend.rag.embedder import Embedder, EmbedderUnavailable
+from backend.rag.reranker import rerank_chunks
 
 # RRF_K：TREC 缺省 60 适用于大候选池；本系统单店万级块内，K 取小值
 # 拉大头部排名差距——避免单路 rank0 被另一路 rank9+ 的噪声块淹没（实测教训）
@@ -122,6 +124,7 @@ def search(
         if len(results) >= top_k:
             break
 
-    if reranker is not None:
-        results = reranker(query, results)
+    if reranker is None:
+        reranker = rerank_chunks  # 未配置 rerank_url 时其内部直接原样返回（零开销）
+    results = reranker(query, results)
     return results

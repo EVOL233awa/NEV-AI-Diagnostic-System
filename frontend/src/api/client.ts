@@ -416,14 +416,39 @@ export interface AgentParams {
   summary_max_chars: number
 }
 
+export interface RerankView {
+  enabled: boolean
+  url: string
+  model: string
+  score_threshold: number
+  has_key: boolean
+  key_masked: string
+}
+
+export interface SmallModelView {
+  base_url: string
+  model: string
+  has_key: boolean
+  key_masked: string
+  fallback: string
+  disable_thinking: boolean
+  title_temperature: number
+  title_max_tokens: number
+  title_input_chars: number
+  extract_temperature: number
+  extract_max_tokens: number
+  extract_input_chars: number
+}
+
 export interface SuperadminConfig {
   providers: {
     main: ProviderSlotView
     background: ProviderSlotView
     embedding: ProviderSlotView
+    rerank: RerankView
+    small_model: SmallModelView
     web_search: { has_key: boolean; key_masked: string }
     subagent_url: string
-    rerank_url: string
   }
   agent: AgentParams
   server: { host: string; port: number; version: string; restart_required_keys: string[] }
@@ -435,9 +460,27 @@ export interface SuperadminConfigPayload {
     main?: { base_url?: string; model?: string; api_key?: string }
     background?: { base_url?: string; model?: string; api_key?: string }
     embedding?: { base_url?: string; model?: string; api_key?: string }
+    rerank?: {
+      enabled?: boolean
+      url?: string
+      model?: string
+      api_key?: string
+      score_threshold?: number
+    }
+    small_model?: {
+      base_url?: string
+      model?: string
+      api_key?: string
+      disable_thinking?: boolean
+      title_temperature?: number
+      title_max_tokens?: number
+      title_input_chars?: number
+      extract_temperature?: number
+      extract_max_tokens?: number
+      extract_input_chars?: number
+    }
     web_search?: { api_key?: string }
     subagent_url?: string
-    rerank_url?: string
   }
   agent?: Partial<AgentParams>
 }
@@ -462,7 +505,7 @@ export async function saveSuperadminConfig(payload: SuperadminConfigPayload): Pr
   return data
 }
 
-export async function testProviderSlot(slot: 'main' | 'background' | 'embedding' | 'web_search'): Promise<SlotTestResult> {
+export async function testProviderSlot(slot: 'main' | 'background' | 'embedding' | 'rerank' | 'small_model' | 'web_search'): Promise<SlotTestResult> {
   const { data } = await http.post<SlotTestResult>('/api/superadmin/config/test', { slot }, { timeout: 60000 })
   return data
 }

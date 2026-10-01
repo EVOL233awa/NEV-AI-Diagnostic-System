@@ -1,8 +1,8 @@
-"""本地子代理抽取/标题生成的离线单测（B1）——httpx 全 mock，绝不触 :11435。
+"""小模型抽取/标题生成的离线单测——httpx 全 mock，绝不触真实 API。
 
 覆盖：JSON 剥取（纯/fence/噪声前后缀）、非法输出降级 None、字段清洗
-（vehicle 截断、symptoms 过滤+上限）、URL 未配置降级、网络异常降级、
-标题 strip 与 16 字硬截。
+（vehicle 截断、symptoms 过滤+上限）、background 回退路径（成功/失败降级）、
+网络异常降级、标题 strip 与 16 字硬截。
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 import backend.core.agent.extractor as extractor
+from backend.core.providers.llm import ChatResult
 
 
 class _FakeResp:
@@ -57,7 +58,9 @@ def fake_http(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         extractor,
         "settings",
-        SimpleNamespace(local_models={"subagent_url": "http://fake:11435"}),
+        SimpleNamespace(
+            small_model={"base_url": "http://fake:11435", "model": "test-small-model"},
+        ),
     )
     yield
 
@@ -102,8 +105,32 @@ class TestExtractCaseNotes:
         assert notes["vehicle"] == "v" * 64
         assert notes["symptoms"] == ["a", "b", "c", "d", "e"]  # 空串/非字符串过滤 + 上限 5
 
-    def test_no_url_returns_none(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr(extractor, "settings", SimpleNamespace(local_models={}))
+    def test_fallback_to_background(self, monkeypatch: pytest.MonkeyPatch):
+        """槽位未配置 → 回退 background 槽位（主聊天模型），thinking 参数照传。"""
+        monkeypatch.setattr(extractor, "settings", SimpleNamespace(small_model={}))
+
+        class _StubProvider:
+            def __init__(self) -> None:
+                self.captured: dict | None = None
+
+            async def chat(self, messages, **params):
+                self.captured = params
+                return ChatResult(content=json.dumps({"vehicle": "回退模型", "symptoms": []}, ensure_ascii=False))
+
+        stub = _StubProvider()
+        monkeypatch.setattr(extractor, "get_background_provider", lambda: stub)
+        notes = _run("冬天续航掉得厉害")
+        assert notes == {"vehicle": "回退模型"}
+        assert stub.captured is not None and "thinking" in stub.captured
+
+    def test_fallback_error_returns_none(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(extractor, "settings", SimpleNamespace(small_model={}))
+
+        class _BrokenProvider:
+            async def chat(self, messages, **params):
+                raise httpx.ConnectError("refused")
+
+        monkeypatch.setattr(extractor, "get_background_provider", lambda: _BrokenProvider())
         assert _run("x") is None
 
     def test_network_error_returns_none(self):

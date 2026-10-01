@@ -185,7 +185,10 @@ def list_messages(session_id: int, user: CurrentUser, db: DbSession) -> dict:
 
 
 def _spawn_case_notes_extraction(session_id: int, content: str) -> None:
-    """新会话首条描述 → 本地小模型异步抽取状态卡初稿（不阻塞主对话，失败留空）。"""
+    """新会话首条描述 → 小模型异步抽取状态卡初稿（不阻塞主对话，失败留空）。
+
+    槽位链：small_model 配置节（云端 OpenAI 兼容 API）→ 缺省回退后台主聊天模型。
+    """
 
     async def _run() -> None:
         notes = await extract_case_notes(content)
@@ -204,7 +207,7 @@ def _spawn_case_notes_extraction(session_id: int, content: str) -> None:
 
 
 def _spawn_title_generation(session_id: int, content: str) -> None:
-    """新会话首条描述 → 本地小模型异步生成会话标题。
+    """新会话首条描述 → 小模型异步生成会话标题。
 
     只覆盖默认标题「新诊断会话」；用户建会话时自定义的名字不覆盖。失败静默保留原标题。
     """

@@ -39,14 +39,25 @@ async function testBaseConnection(): Promise<void> {
 }
 
 // key 永远拿不到明文：用户输入的新 key 存这里，留空 = 不修改（后端语义）
-const newKeys = reactive({ main: '', background: '', embedding: '', web_search: '' })
+const newKeys = reactive({ main: '', background: '', embedding: '', rerank: '', small_model: '', web_search: '' })
 
 const providers = reactive({
   main: { base_url: '', model: '' },
   background: { base_url: '', model: '' },
   embedding: { base_url: '', model: '' },
   subagent_url: '',
-  rerank_url: '',
+  rerank: { enabled: false, url: '', model: '', score_threshold: 0 },
+  small_model: {
+    base_url: '',
+    model: '',
+    disable_thinking: true,
+    title_temperature: 0.2,
+    title_max_tokens: 60,
+    title_input_chars: 500,
+    extract_temperature: 0,
+    extract_max_tokens: 300,
+    extract_input_chars: 800,
+  },
 })
 
 const agent = reactive({
@@ -66,6 +77,8 @@ const testResults: Record<string, SlotTestResult | null> = reactive({
   main: null,
   background: null,
   embedding: null,
+  rerank: null,
+  small_model: null,
   web_search: null,
 })
 const testing = reactive<Record<string, boolean>>({})
@@ -79,7 +92,21 @@ function fillForm(data: SuperadminConfig): void {
   providers.embedding.base_url = data.providers.embedding.base_url
   providers.embedding.model = data.providers.embedding.model
   providers.subagent_url = data.providers.subagent_url
-  providers.rerank_url = data.providers.rerank_url
+  providers.rerank.enabled = data.providers.rerank.enabled
+  providers.rerank.url = data.providers.rerank.url
+  providers.rerank.model = data.providers.rerank.model
+  providers.rerank.score_threshold = data.providers.rerank.score_threshold
+  Object.assign(providers.small_model, {
+    base_url: data.providers.small_model.base_url,
+    model: data.providers.small_model.model,
+    disable_thinking: data.providers.small_model.disable_thinking,
+    title_temperature: data.providers.small_model.title_temperature,
+    title_max_tokens: data.providers.small_model.title_max_tokens,
+    title_input_chars: data.providers.small_model.title_input_chars,
+    extract_temperature: data.providers.small_model.extract_temperature,
+    extract_max_tokens: data.providers.small_model.extract_max_tokens,
+    extract_input_chars: data.providers.small_model.extract_input_chars,
+  })
   Object.assign(agent, data.agent)
 }
 
@@ -111,11 +138,18 @@ async function save(): Promise<void> {
         },
         web_search: newKeys.web_search ? { api_key: newKeys.web_search } : undefined,
         subagent_url: providers.subagent_url,
-        rerank_url: providers.rerank_url,
+        rerank: {
+          enabled: providers.rerank.enabled,
+          url: providers.rerank.url,
+          model: providers.rerank.model,
+          score_threshold: providers.rerank.score_threshold,
+          api_key: newKeys.rerank || undefined,
+        },
+        small_model: { ...providers.small_model, api_key: newKeys.small_model || undefined },
       },
       agent: { ...agent },
     })
-    Object.assign(newKeys, { main: '', background: '', embedding: '', web_search: '' })
+    Object.assign(newKeys, { main: '', background: '', embedding: '', rerank: '', small_model: '', web_search: '' })
     fillForm(await fetchSuperadminConfig())
     ElMessage.success('已保存，配置对后续请求即时生效')
   } catch (e) {
@@ -125,7 +159,9 @@ async function save(): Promise<void> {
   }
 }
 
-async function testSlot(slot: 'main' | 'background' | 'embedding' | 'web_search'): Promise<void> {
+async function testSlot(
+  slot: 'main' | 'background' | 'embedding' | 'rerank' | 'small_model' | 'web_search',
+): Promise<void> {
   testing[slot] = true
   testResults[slot] = null
   try {
@@ -255,13 +291,79 @@ function testText(result: SlotTestResult | null): string {
           <el-form-item label="本地小模型地址（可选）">
             <el-input v-model="providers.subagent_url" placeholder="http://127.0.0.1:11435（留空 = 本地默认）" />
           </el-form-item>
-          <el-form-item label="重排地址">
-            <el-input v-model="providers.rerank_url" placeholder="留空 = 不启用重排" />
-          </el-form-item>
         </el-form>
         <div class="slot-actions">
           <el-button size="small" :loading="testing.web_search" @click="testSlot('web_search')">测试连接</el-button>
           <span class="test-result" :class="testResults.web_search?.ok ? 'ok' : 'fail'">{{ testText(testResults.web_search) }}</span>
+        </div>
+
+        <el-divider />
+
+        <h4 class="slot-title">检索重排（对向量召回结果精排）</h4>
+        <el-form label-width="180px" class="grid-form">
+          <el-form-item label="启用重排">
+            <el-switch v-model="providers.rerank.enabled" />
+          </el-form-item>
+          <el-form-item label="重排 API 地址">
+            <el-input v-model="providers.rerank.url" placeholder="https://api.siliconflow.cn（留空 = 不启用重排）" />
+          </el-form-item>
+          <el-form-item label="重排模型">
+            <el-input v-model="providers.rerank.model" placeholder="BAAI/bge-reranker-v2-m3（免费）" />
+          </el-form-item>
+          <el-form-item label="重排 API Key">
+            <el-input
+              v-model="newKeys.rerank"
+              type="password"
+              show-password
+              :placeholder="keyPlaceholder(cfg!.providers.rerank.has_key, cfg!.providers.rerank.key_masked)"
+            />
+          </el-form-item>
+          <el-form-item label="分数阈值（0=纯排序）">
+            <el-input-number v-model="providers.rerank.score_threshold" :min="0" :max="1" :step="0.05" :precision="2" />
+          </el-form-item>
+        </el-form>
+        <div class="slot-actions">
+          <el-button size="small" :loading="testing.rerank" @click="testSlot('rerank')">测试连接</el-button>
+          <span class="test-result" :class="testResults.rerank?.ok ? 'ok' : 'fail'">{{ testText(testResults.rerank) }}</span>
+        </div>
+
+        <el-divider />
+
+        <h4 class="slot-title">小模型槽位（会话标题 / 状态卡抽取）</h4>
+        <el-form label-width="180px" class="grid-form">
+          <el-form-item label="API 地址">
+            <el-input v-model="providers.small_model.base_url" placeholder="留空 = 用主聊天模型（后台槽位）生成" />
+          </el-form-item>
+          <el-form-item label="模型">
+            <el-input v-model="providers.small_model.model" placeholder="如 Qwen/Qwen3.5-4B（免费档实测排队可达 1 分钟）" />
+          </el-form-item>
+          <el-form-item label="API Key">
+            <el-input
+              v-model="newKeys.small_model"
+              type="password"
+              show-password
+              :placeholder="keyPlaceholder(cfg!.providers.small_model.has_key, cfg!.providers.small_model.key_masked)"
+            />
+          </el-form-item>
+          <el-form-item label="关闭思考模式">
+            <el-switch v-model="providers.small_model.disable_thinking" />
+          </el-form-item>
+          <el-form-item label="标题温度 / Token 上限">
+            <el-input-number v-model="providers.small_model.title_temperature" :min="0" :max="2" :step="0.1" :precision="1" />
+            <el-input-number v-model="providers.small_model.title_max_tokens" :min="16" :max="512" :step="16" class="ml8" />
+          </el-form-item>
+          <el-form-item label="抽取温度 / Token 上限">
+            <el-input-number v-model="providers.small_model.extract_temperature" :min="0" :max="2" :step="0.1" :precision="1" />
+            <el-input-number v-model="providers.small_model.extract_max_tokens" :min="50" :max="2000" :step="50" class="ml8" />
+          </el-form-item>
+          <el-form-item label="输入截断（标题 / 抽取）">
+            <el-input-number v-model="providers.small_model.title_input_chars" :min="50" :max="2000" :step="50" />
+            <el-input-number v-model="providers.small_model.extract_input_chars" :min="100" :max="8000" :step="100" class="ml8" />
+          </el-form-item>
+        </el-form>
+        <div class="slot-actions">
+          <el-button size="small" :loading="testing.small_model" @click="testSlot('small_model')">测试连接</el-button>
+          <span class="test-result" :class="testResults.small_model?.ok ? 'ok' : 'fail'">{{ testText(testResults.small_model) }}</span>
         </div>
       </el-card>
 

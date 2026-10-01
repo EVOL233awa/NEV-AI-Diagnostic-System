@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-10-02
+
+RAG 检索质量优化小版本：云端重排接入 + 修改config默认项 + superadmin调试后台增加更多配置项
+
+### Added
+
+- **云端重排**：知识库检索在向量召回后新增重排环节——云端重排模型对召回结果按与问题的相关性重新排序，让最相关的资料排在最前面，诊断回答的依据更准；重排服务不可用时自动保持原有顺序，检索不中断。
+- **小模型槽位**：会话标题与诊断状态卡抽取改为独立配置的云端小模型，不配置时自动回退主聊天模型，云服务器部署不再依赖本地模型；小模型默认关闭思考模式，响应更快。
+- **superadmin 调试后台新增配置项**：重排开关与重排模型、小模型槽位的地址、模型、Key 及温度、输出上限等参数全部支持在线配置，保存即生效，并新增重排与小模型的「测试连接」。
+
+### Changed
+
+- config 默认配置指向硅基流动云端（嵌入与重排均有免费模型，检索链路 API 账单为 0），并推荐用户注册接入；本地 llama-server 部署降为可选形态说明。
+
 ## [2.0.0] - 2026-09-28
 
 从 1.0 纯前端原型迭代至 2.0 全栈系统：整体重构为前后端一体架构，诊断引擎升级为服务端 Agentic RAG，新增三级角色业务闭环。完整介绍见 [README](README.md)。
@@ -36,5 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 纯前端原型：单页应用（HTML/CSS/Vanilla JS）在浏览器内直接调用 LLM API，API Key 与会话记录存于 localStorage；内置静态知识库 + 场景识别 + 规则引擎提供检索问答；含「预约检修引导」占位入口。
 
+[2.0.1]: https://github.com/EVOL233awa/NEV-AI-Diagnostic-System/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/EVOL233awa/NEV-AI-Diagnostic-System/compare/v1.0...v2.0.0
 [1.0.0]: https://github.com/EVOL233awa/NEV-AI-Diagnostic-System/releases/tag/v1.0

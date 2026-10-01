@@ -11,6 +11,7 @@ from __future__ import annotations
 import time
 from typing import Any, Literal
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -19,11 +20,14 @@ from backend.config import (
     AGENT_DEFAULTS,
     AGENT_PARAM_RANGES,
     APP_VERSION,
+    RERANK_PARAM_RANGES,
+    SMALL_MODEL_PARAM_RANGES,
     save_raw,
     settings,
 )
 from backend.core.providers.llm import get_background_provider, get_main_provider
 from backend.db.models import AuditLog, User
+from backend.rag.reranker import rerank_api
 
 router = APIRouter(prefix="/api/superadmin", tags=["superadmin"])
 
@@ -45,13 +49,39 @@ class ProviderUpsert(BaseModel):
     api_key: str | None = Field(default=None, max_length=512)
 
 
+class RerankUpsert(BaseModel):
+    """重排配置（local_models 节）。数值 None = 不修改；区间校验见 RERANK_PARAM_RANGES。"""
+
+    enabled: bool | None = None
+    url: str | None = Field(default=None, max_length=256)
+    model: str | None = Field(default=None, max_length=128)
+    api_key: str | None = Field(default=None, max_length=512)  # 空 = 回落 embedding_key
+    score_threshold: float | None = None
+
+
+class SmallModelUpsert(BaseModel):
+    """小模型槽位（标题/状态卡抽取）。base_url+model 全空 = 回退 background 槽位。"""
+
+    base_url: str | None = Field(default=None, max_length=256)
+    model: str | None = Field(default=None, max_length=128)
+    api_key: str | None = Field(default=None, max_length=512)
+    disable_thinking: bool | None = None
+    title_temperature: float | None = None
+    title_max_tokens: int | None = None
+    title_input_chars: int | None = None
+    extract_temperature: float | None = None
+    extract_max_tokens: int | None = None
+    extract_input_chars: int | None = None
+
+
 class ProvidersIn(BaseModel):
     main: ProviderUpsert | None = None
     background: ProviderUpsert | None = None
     embedding: ProviderUpsert | None = None
+    rerank: RerankUpsert | None = None
+    small_model: SmallModelUpsert | None = None
     web_search: ProviderUpsert | None = None
     subagent_url: str | None = Field(default=None, max_length=256)
-    rerank_url: str | None = Field(default=None, max_length=256)
 
 
 class AgentIn(BaseModel):
@@ -75,12 +105,13 @@ class ConfigIn(BaseModel):
 
 
 class TestIn(BaseModel):
-    slot: Literal["main", "background", "embedding", "web_search"]
+    slot: Literal["main", "background", "embedding", "web_search", "rerank", "small_model"]
 
 
 def _provider_view() -> dict[str, Any]:
     ds = settings.deepseek
     lm = settings.local_models
+    sm = settings.small_model
     tavily_key = str(settings.tavily.get("api_key") or "")
     return {
         "main": {
@@ -101,12 +132,33 @@ def _provider_view() -> dict[str, Any]:
             "has_key": bool(lm.get("embedding_key")),
             "key_masked": _mask(str(lm.get("embedding_key") or "")),
         },
+        "rerank": {
+            "enabled": bool(lm.get("rerank_enabled", True)),
+            "url": str(lm.get("rerank_url", "")),
+            "model": str(lm.get("rerank_model", "")),
+            "score_threshold": float(lm.get("rerank_score_threshold") or 0.0),
+            "has_key": bool(lm.get("rerank_key") or lm.get("embedding_key")),
+            "key_masked": _mask(str(lm.get("rerank_key") or lm.get("embedding_key") or "")),
+        },
+        "small_model": {
+            "base_url": str(sm.get("base_url", "")),
+            "model": str(sm.get("model", "")),
+            "has_key": bool(sm.get("api_key")),
+            "key_masked": _mask(str(sm.get("api_key") or "")),
+            "fallback": str(ds.get("background_model") or ds.get("main_model") or ""),
+            "disable_thinking": bool(sm.get("disable_thinking", True)),
+            "title_temperature": float(sm.get("title_temperature", 0.2)),
+            "title_max_tokens": int(sm.get("title_max_tokens", 60)),
+            "title_input_chars": int(sm.get("title_input_chars", 500)),
+            "extract_temperature": float(sm.get("extract_temperature", 0.0)),
+            "extract_max_tokens": int(sm.get("extract_max_tokens", 300)),
+            "extract_input_chars": int(sm.get("extract_input_chars", 800)),
+        },
         "web_search": {
             "has_key": bool(tavily_key),
             "key_masked": _mask(tavily_key),
         },
         "subagent_url": str(lm.get("subagent_url", "")),
-        "rerank_url": str(lm.get("rerank_url", "")),
     }
 
 
@@ -164,9 +216,67 @@ def _apply_providers(body: ProvidersIn) -> list[str]:
     if body.subagent_url is not None:
         lm["subagent_url"] = body.subagent_url.strip()
         touched.append("local_models.subagent_url")
-    if body.rerank_url is not None:
-        lm["rerank_url"] = body.rerank_url.strip()
-        touched.append("local_models.rerank_url")
+    if body.rerank is not None:
+        touched += _apply_rerank(body.rerank, lm)
+    if body.small_model is not None:
+        touched += _apply_small_model(body.small_model)
+    return touched
+
+
+def _apply_rerank(body: RerankUpsert, lm: dict[str, Any]) -> list[str]:
+    touched: list[str] = []
+    if body.enabled is not None:
+        lm["rerank_enabled"] = bool(body.enabled)
+        touched.append("rerank_enabled")
+    if body.url is not None:
+        lm["rerank_url"] = body.url.strip()
+        touched.append("rerank_url")
+    if body.model is not None:
+        lm["rerank_model"] = body.model.strip()
+        touched.append("rerank_model")
+    if body.api_key:  # None/空串 = 保持原值
+        lm["rerank_key"] = body.api_key.strip()
+        touched.append("rerank_key")
+    if body.score_threshold is not None:
+        lo, hi = RERANK_PARAM_RANGES["rerank_score_threshold"]
+        if not lo <= body.score_threshold <= hi:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"rerank.score_threshold 超出合法区间 [{lo}, {hi}]",
+            )
+        lm["rerank_score_threshold"] = body.score_threshold
+        touched.append("rerank_score_threshold")
+    return touched
+
+
+def _apply_small_model(body: SmallModelUpsert) -> list[str]:
+    sm = settings.raw.setdefault("small_model", {})
+    touched: list[str] = []
+    if body.base_url is not None:
+        sm["base_url"] = body.base_url.strip()
+        touched.append("small_model.base_url")
+    if body.model is not None:
+        sm["model"] = body.model.strip()
+        touched.append("small_model.model")
+    if body.api_key:  # None/空串 = 保持原值
+        sm["api_key"] = body.api_key.strip()
+        touched.append("small_model.api_key")
+    if body.disable_thinking is not None:
+        sm["disable_thinking"] = bool(body.disable_thinking)
+        touched.append("small_model.disable_thinking")
+    ranged: dict[str, float | int] = {
+        k: v for k in SMALL_MODEL_PARAM_RANGES
+        if (v := getattr(body, k)) is not None
+    }
+    for field, value in ranged.items():
+        lo, hi = SMALL_MODEL_PARAM_RANGES[field]
+        if not lo <= value <= hi:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"small_model.{field} 超出合法区间 [{lo}, {hi}]",
+            )
+        sm[field] = value
+        touched.append(f"small_model.{field}")
     return touched
 
 
@@ -246,6 +356,59 @@ async def test_slot(body: TestIn, user: User = Depends(require_roles("superadmin
             "detail": f"返回 {len(vectors)} 条 × {len(vectors[0]) if vectors else 0} 维",
             "latency_ms": _elapsed(),
         }
+
+    if body.slot == "rerank":
+        lm = settings.local_models
+        url = str(lm.get("rerank_url") or "").strip()
+        if not url:
+            return {"ok": False, "slot": body.slot, "error": "rerank_url 未配置", "latency_ms": 0}
+        model = str(lm.get("rerank_model") or "")
+        api_key = str(lm.get("rerank_key") or lm.get("embedding_key") or "")
+        try:
+            ranked = rerank_api(
+                url, api_key, model, "动力电池故障",
+                ["低温环境下锂电池续航衰减明显", "直流快充桩的充电流程与握手协议"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "slot": body.slot, "error": str(exc), "latency_ms": _elapsed()}
+        return {
+            "ok": True, "slot": body.slot, "model": model,
+            "detail": f"top1=文档{ranked[0][0] + 1}（score {ranked[0][1]:.3f}）",
+            "latency_ms": _elapsed(),
+        }
+
+    if body.slot == "small_model":
+        sm = settings.small_model
+        base_url = str(sm.get("base_url") or "").strip()
+        ds = settings.deepseek
+        if not (base_url and sm.get("model")):  # 回退 background 槽位
+            base_url = str(ds.get("background_base_url") or ds.get("base_url") or "")
+            model = str(ds.get("background_model") or ds.get("main_model") or "")
+            api_key = str(ds.get("background_key") or ds.get("main_key") or "")
+        else:
+            model = str(sm.get("model") or "")
+            api_key = str(sm.get("api_key") or "")
+        if not (base_url and model and api_key):
+            return {"ok": False, "slot": body.slot, "error": "槽位不完整（base_url/model/api_key）", "latency_ms": 0}
+        body_json: dict[str, Any] = {
+            "model": model,
+            "messages": [{"role": "user", "content": "连通性测试：请只回复两个字「正常」"}],
+            "max_tokens": 16, "temperature": 0.0,
+        }
+        if sm.get("disable_thinking", True):
+            body_json["thinking"] = {"type": "disabled"}
+        try:
+            async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+                resp = await client.post(
+                    f"{base_url.rstrip('/')}/chat/completions",
+                    json=body_json,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                resp.raise_for_status()
+                reply = str(resp.json()["choices"][0]["message"]["content"] or "")
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "slot": body.slot, "error": str(exc), "latency_ms": _elapsed()}
+        return {"ok": True, "slot": body.slot, "model": model, "reply": reply[:100], "latency_ms": _elapsed()}
 
     from backend.core.providers import tavily
     from backend.core.providers.tavily import WebSearchUnavailable

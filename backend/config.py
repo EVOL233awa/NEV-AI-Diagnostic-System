@@ -4,8 +4,15 @@
   server        = { host, port }
   deepseek      = { base_url, main_model, main_key, background_model, background_key }
   tavily        = { api_key }
-  local_models  = { embedding_url, embedding_model, embedding_key, subagent_url, rerank_url }
+  local_models  = { embedding_url, embedding_model, embedding_key, subagent_url, rerank_url,
+                    rerank_key, rerank_enabled, rerank_model, rerank_score_threshold }
                   embedding_key 非空时嵌入请求带 Bearer 认证（远端 OpenAI 兼容 API，如硅基流动）
+  small_model   = { base_url, model, api_key, disable_thinking,
+                    title_temperature, title_max_tokens, title_input_chars,
+                    extract_temperature, extract_max_tokens, extract_input_chars }
+                  标题/状态卡抽取的小模型槽位（OpenAI 兼容）；base_url+model 均空 =
+                  回退 background 槽位（主聊天模型）。disable_thinking 请求带
+                  thinking={"type":"disabled"}（DeepSeek 生效，部分供应商忽略该字段）。
   cors_origins  = [ ... ]           可选，缺省用 DEFAULT_CORS_ORIGINS
   security      = { jwt_secret }    首次启动自动生成并写回
   seed_admin    = { username, password } 首次初始化账号时写入（密码仅落此文件）
@@ -30,7 +37,7 @@ LOG_DIR = DATA_DIR / "logs"
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
 APP_TITLE = "新能源汽车 AI 智能诊断系统 2.0"
-APP_VERSION = "2.0.0-alpha.0"
+APP_VERSION = "2.0.1"
 
 DEFAULT_CORS_ORIGINS = [
     "https://nev.evoidngc.top",
@@ -67,6 +74,21 @@ AGENT_PARAM_RANGES: dict[str, tuple[int | float, int | float]] = {
     "summary_max_chars": (200, 4000),
 }
 
+# 重排参数（local_models 节，superadmin PUT 校验区间；score_threshold 实测评见 rag/reranker.py）
+RERANK_PARAM_RANGES: dict[str, tuple[int | float, int | float]] = {
+    "rerank_score_threshold": (0.0, 1.0),
+}
+
+# 小模型（标题/状态卡抽取）数字参数区间（small_model 节；输入截断即"上下文窗口"约束）
+SMALL_MODEL_PARAM_RANGES: dict[str, tuple[int | float, int | float]] = {
+    "title_temperature": (0.0, 2.0),
+    "title_max_tokens": (16, 512),
+    "title_input_chars": (50, 2000),
+    "extract_temperature": (0.0, 2.0),
+    "extract_max_tokens": (50, 2000),
+    "extract_input_chars": (100, 8000),
+}
+
 
 @dataclass
 class Settings:
@@ -87,6 +109,10 @@ class Settings:
     @property
     def local_models(self) -> dict[str, Any]:
         return self.raw.get("local_models", {})
+
+    @property
+    def small_model(self) -> dict[str, Any]:
+        return self.raw.get("small_model", {})
 
     @property
     def seed_admin(self) -> dict[str, Any]:
