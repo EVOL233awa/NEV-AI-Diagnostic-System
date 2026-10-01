@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-10-02
+
+RAG 检索降级链优化：jieba 分词词典优化 + 嵌入缓存 + 检索档位日志。
+
+### Added
+
+- **检索档位日志**：每次 RAG 检索在服务端日志记录当前降级档位（向量主路 / BM25 关键词降级）、重排是否生效、命中数与耗时，部署者直接看日志即可确认云端服务健康状况。
+- **嵌入缓存（LRU）**：相同查询的 embedding 结果在进程内自动复用，追问与同题复查场景不再重复调用云端嵌入接口，检索更快。
+
+### Changed
+
+- **jieba 分词优化**：领域术语（动力电池组、快充口、充电枪、高压配电箱等）与语料中的全部 DTC 故障码加入 jieba 词典，并过滤无意义的虚词与疑问词，BM25 关键词降级路线对术语的字面匹配更准。
+
 ## [2.0.1] - 2026-10-02
 
 RAG 检索质量优化小版本：云端重排接入 + 修改config默认项 + superadmin调试后台增加更多配置项

@@ -208,7 +208,7 @@ python -m backend.seed.load_corpus  # 重新导入内置知识库（自动去重
 ## 测试
 
 ```bash
-python -m pytest tests/    # 97 例，全离线临时库，不触碰真实 data/
+python -m pytest tests/    # 103 例，全离线临时库，不触碰真实 data/
 cd frontend && npm run typecheck && npm run build
 ```
 
@@ -235,7 +235,7 @@ backend/
   seed/                  演示账号 + 演示车辆 + 内置知识库（corpus/）
   app.py                 应用工厂（CORS + 静态托管 + SPA fallback）
 frontend/                Vue 3 + TypeScript + Vite + Element Plus
-tests/                   pytest 回归套件（97 例）
+tests/                   pytest 回归套件（103 例）
 data/                    运行时生成：config.json / data.db / logs/（不入库）
 ```
 

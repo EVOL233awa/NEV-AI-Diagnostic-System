@@ -37,7 +37,7 @@ LOG_DIR = DATA_DIR / "logs"
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
 APP_TITLE = "新能源汽车 AI 智能诊断系统 2.0"
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 
 DEFAULT_CORS_ORIGINS = [
     "https://nev.evoidngc.top",

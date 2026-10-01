@@ -208,7 +208,7 @@ The backend is a pure orchestration layer and hosts no model compute: the five m
 ## Testing
 
 ```bash
-python -m pytest tests/    # 97 cases, fully offline on a temp DB, never touches real data/
+python -m pytest tests/    # 103 cases, fully offline on a temp DB, never touches real data/
 cd frontend && npm run typecheck && npm run build
 ```
 
@@ -235,7 +235,7 @@ backend/
   seed/                  demo accounts + demo vehicles + built-in corpus (corpus/)
   app.py                 app factory (CORS + static hosting + SPA fallback)
 frontend/                Vue 3 + TypeScript + Vite + Element Plus
-tests/                   pytest regression suite (97 cases)
+tests/                   pytest regression suite (103 cases)
 data/                    runtime-generated: config.json / data.db / logs/ (not committed)
 ```
 

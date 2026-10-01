@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -19,6 +21,8 @@ from backend.rag import vecstore
 from backend.rag.bm25 import bm25_index
 from backend.rag.embedder import Embedder, EmbedderUnavailable
 from backend.rag.reranker import rerank_chunks
+
+logger = logging.getLogger(__name__)
 
 # RRF_K：TREC 缺省 60 适用于大候选池；本系统单店万级块内，K 取小值
 # 拉大头部排名差距——避免单路 rank0 被另一路 rank9+ 的噪声块淹没（实测教训）
@@ -63,6 +67,7 @@ def search(
     reranker: Callable[[str, list[RetrievedChunk]], list[RetrievedChunk]] | None = None,
 ) -> list[RetrievedChunk]:
     """单次混合检索。category 过滤在候选层做（向量路 KNN 取足量再过滤）。"""
+    t0 = time.perf_counter()
     query = query.strip()
     if not query:
         return []
@@ -83,6 +88,10 @@ def search(
 
     fused = _rrf_fuse(ranked, top_k=top_k * 3)
     if not fused:
+        logger.info(
+            "检索完成 leg=%s rerank=off 命中=0/%d %.0fms",
+            "+".join(ranked) or "none", top_k, (time.perf_counter() - t0) * 1000,
+        )
         return []
 
     ids = [cid for cid, _s, _l in fused]
@@ -126,5 +135,14 @@ def search(
 
     if reranker is None:
         reranker = rerank_chunks  # 未配置 rerank_url 时其内部直接原样返回（零开销）
-    results = reranker(query, results)
-    return results
+    reranked = reranker(query, results)
+    # rerank_chunks 成功返回新列表、未启用/失败返回原对象——identity 即降级信号
+    rerank_applied = reranked is not results
+    logger.info(
+        "检索完成 leg=%s rerank=%s 命中=%d/%d %.0fms",
+        "+".join(ranked) or "none",
+        "on" if rerank_applied else "off",
+        len(reranked), top_k,
+        (time.perf_counter() - t0) * 1000,
+    )
+    return reranked
