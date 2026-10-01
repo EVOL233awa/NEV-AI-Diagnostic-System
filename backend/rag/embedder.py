@@ -4,7 +4,7 @@
 2026-09-29 实测：硅基流动 BAAI/bge-m3（https://api.siliconflow.cn/v1）同为 1024 维，
 单条 P50 约 150-190ms，batch=64 均摊约 25ms/条。
 embedding_key 非空即视为远端 API，请求携带 Bearer 认证；两者接口形态一致。
-嵌入服务不可达/认证失败均抛 EmbedderUnavailable，检索引擎据此退化为纯关键词路（§4 容错）。
+嵌入服务不可达/认证失败均抛 EmbedderUnavailable，检索引擎据此退化为纯关键词路。
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class Embedder:
         self.model = model or str(lm.get("embedding_model", "bge-m3"))
         self.api_key = str(lm["embedding_key"]) if lm.get("embedding_key") else ""
         self.timeout_s = timeout_s
-        self.dim = 1024  # bge-m3 实测维度（阶段 1 首日核验；硅基流动云端同为 1024）
+        self.dim = 1024  # bge-m3 实测维度（硅基流动云端同为 1024）
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:

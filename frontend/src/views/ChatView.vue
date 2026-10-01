@@ -345,7 +345,7 @@ async function submitAnswers(turn: Turn): Promise<void> {
   await runStream(`/api/chat/sessions/${activeId.value}/answers`, { answers: pairs })
 }
 
-/** 一键预约（阶段 4）：诊断结论出现后，携带当前会话生成预约工单（摘要卡后端自动快照） */
+/** 一键预约：诊断结论出现后，携带当前会话生成预约工单（摘要卡后端自动快照） */
 const bookDialogVisible = ref(false)
 const bookTime = ref<Date | null>(null)
 const bookNote = ref('')

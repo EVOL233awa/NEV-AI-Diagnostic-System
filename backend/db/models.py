@@ -1,8 +1,7 @@
-"""ORM 模型：重构计划 §2.1 表清单，全部业务表从第一天带 tenant_id（决策 #4）。
+"""ORM 模型：全部业务表从第一天带 tenant_id。
 
-阶段 0 仅 users 表有业务写入，其余表随阶段 1~4 逐步启用；
 embeddings（sqlite-vec 虚拟表）与 kb_chunks_fts（FTS5 虚拟表）由
-阶段 1 的向量库/全文索引模块以原生 SQL 创建，不在 ORM 内。
+向量库/全文索引模块以原生 SQL 创建，不在 ORM 内。
 """
 from __future__ import annotations
 
@@ -38,7 +37,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(256))
     role: Mapped[str] = mapped_column(String(16))  # owner / staff / admin
     display_name: Mapped[str] = mapped_column(String(64), default="")
-    # 决策 #15：店员可见我的对话记录，默认开启
+    # 店员可见我的对话记录，默认开启
     privacy_share_dialog: Mapped[bool] = mapped_column(Boolean, default=True)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
@@ -48,7 +47,7 @@ class User(Base):
 
 
 class VehicleProfile(Base):
-    """车辆档案（§6 记忆层 2：跨会话按车归档）。"""
+    """车辆档案（跨会话按车归档）。"""
 
     __tablename__ = "vehicle_profiles"
 
@@ -93,11 +92,11 @@ class Session(Base):
     channel: Mapped[str] = mapped_column(String(16), default="owner")  # owner / staff
     title: Mapped[str] = mapped_column(String(128), default="新诊断会话")
     status: Mapped[str] = mapped_column(String(16), default="active")  # active / closed
-    # 决策 #13：ask_user 待回答调用随会话落库，支持离线续答（阶段 2 启用）
+    # ask_user 待回答调用随会话落库，支持离线续答
     pending_questions: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    # 诊断状态卡（§6 会话内记忆）：update_case_notes 工具维护，每轮临时注入
+    # 诊断状态卡：update_case_notes 工具维护，每轮临时注入
     case_notes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    # 上下文压缩（§5 双阀门，阶段 3）：前情摘要与已压缩消息边界（messages 原文保留）
+    # 上下文压缩（双阀门）：前情摘要与已压缩消息边界（messages 原文保留）
     context_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     summarized_until_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
@@ -109,7 +108,7 @@ class Session(Base):
 class Message(Base):
     """对话消息。role: user / assistant / tool / system。
 
-    is_temp 对应 AstrBot mark_as_temp 式注入（§6.1）：状态卡等临时块
+    is_temp 对应 AstrBot mark_as_temp 式注入：状态卡等临时块
     单轮拼装、不进对话历史，只随请求发送时以临时消息形式存在。
     """
 
@@ -122,7 +121,7 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     tool_calls: Mapped[list | None] = mapped_column(JSON, nullable=True)
     tool_call_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Agentic 循环产物：诊断 JSON（严重度/故障假设/引用）与通俗摘要（阶段 2 启用）
+    # Agentic 循环产物：诊断 JSON（严重度/故障假设/引用）与通俗摘要
     diag_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
@@ -166,7 +165,7 @@ class KbChunk(Base):
 
 
 class Case(Base):
-    """门店沉淀案例（§6 记忆层 3：数据飞轮回流知识库检索范围）。"""
+    """门店沉淀案例（数据飞轮回流知识库检索范围）。"""
 
     __tablename__ = "cases"
 
@@ -183,8 +182,8 @@ class Case(Base):
 
 
 class Appointment(Base):
-    """预约单：商业闭环衔接点（§8）。summary_card 是诊断摘要卡 JSON，
-    不受车主隐私开关影响、始终对店员可见（决策 #15）。"""
+    """预约单：商业闭环衔接点。summary_card 是诊断摘要卡 JSON，
+    不受车主隐私开关影响、始终对店员可见。"""
 
     __tablename__ = "appointments"
 
@@ -204,7 +203,7 @@ class Appointment(Base):
 
 
 class ProviderConfig(Base):
-    """六类槽位的非密钥配置（密钥只在 data/config.json，§4）。"""
+    """六类槽位的非密钥配置（密钥只在 data/config.json）。"""
 
     __tablename__ = "provider_configs"
 

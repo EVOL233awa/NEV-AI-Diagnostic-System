@@ -1,7 +1,7 @@
 """superadmin 调试后台（2026-09-29 用户裁定）：供应商与 Agent 运行参数在线配置。
 
 定位类似 AstrBot WebUI 的供应商配置页，仅供部署者本人调试使用：
-- 读写 data/config.json（密钥唯一宿主，§4）：改完即落盘，运行中进程热生效
+- 读写 data/config.json（密钥唯一宿主）：改完即落盘，运行中进程热生效
   （provider/embedder/压缩/循环参数均为每次调用实时读取；server/security 除外）。
 - 密钥单向模糊：GET 只回掩码，PUT 留空/缺省 = 保持原值——token 泄露也不会拖出真 key。
 - 全部接口 require_roles("superadmin")；admin 不可见（admin_users 已隔离）。

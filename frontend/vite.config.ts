@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import legacy from '@vitejs/plugin-legacy'
 
-// legacy 插件产出 ES2015 级兼容产物（决策 #16：给老内核车机 WebView 留后路）。
+// legacy 插件产出 ES2015 级兼容产物（给老内核车机 WebView 留后路）。
 // browserslist 不接受字面量 "es2015"，用等价的保守浏览器版本表达同一目标。
 export default defineConfig({
   plugins: [

@@ -1,6 +1,6 @@
 """配置加载：data/config.json 是唯一配置源（含密钥，不进仓库、不下发前端）。
 
-结构约定（见重构计划 §2.1 / §15）：
+结构约定：
   server        = { host, port }
   deepseek      = { base_url, main_model, main_key, background_model, background_key }
   tavily        = { api_key }
@@ -42,13 +42,13 @@ DEFAULT_CORS_ORIGINS = [
 
 # Agent 运行参数（superadmin 后台可调；键缺省回退此处默认值）
 AGENT_DEFAULTS: dict[str, Any] = {
-    "max_tool_rounds": 6,            # 单轮用户消息允许的工具调用循环上限（§3.3 安全阀）
-    "max_ask_user": 3,               # 单轮 ask_user 提问上限（决策 #13）
+    "max_tool_rounds": 6,            # 单轮用户消息允许的工具调用循环上限
+    "max_ask_user": 3,               # 单轮 ask_user 提问上限
     "force_first_round_search": False,  # 首轮硬强制检索：API 层 tool_choice 锁定 kb_search
     "max_tokens": 2000,              # 主模型单次回复 token 上限
     "temperature": 0.6,              # 主模型采样温度
-    "tool_result_max_chars": 4000,   # 单条工具结果截断（§6.1 预算近似）
-    "compress_max_rounds": 20,       # 阀门 1：保留最近轮数（§5 默认）
+    "tool_result_max_chars": 4000,   # 单条工具结果截断
+    "compress_max_rounds": 20,       # 阀门 1：保留最近轮数
     "compress_token_budget": 24000,  # 阀门 2：进上下文历史的估算 token 上限
     "compress_min_keep_rounds": 4,   # 阀门 2 触发时最少保留轮数
     "summary_max_chars": 800,        # 前情摘要长度约束

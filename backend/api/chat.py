@@ -18,7 +18,7 @@ from backend.db.models import Message, OwnerVehicle, Session as ChatSession
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-# 历史里工具结果全文保留的最近轮数（§6.1：当轮全文 + 2 轮后历史瘦身）
+# 历史里工具结果全文保留的最近轮数（当轮全文 + 2 轮后历史瘦身）
 SLIM_TOOL_ROUNDS = 2
 
 
@@ -44,7 +44,7 @@ def _get_session(db: DbSession, session_id: int, user: CurrentUser) -> ChatSessi
 def build_history(db: DbSession, session: ChatSession) -> list[dict]:
     """messages 表 → OpenAI 消息序列。
 
-    工具结果按 tool_call_id 与 assistant.tool_calls 严格配对重放（§6.1：超过 2 轮的
+    工具结果按 tool_call_id 与 assistant.tool_calls 严格配对重放（超过 2 轮的
     检索结果瘦身为一行摘要；ask_user 的车主回答不瘦身——那是诊断事实，丢了压缩也补不回）。
     模型端要求每个 tool_call 都有配对的 tool 消息：用户跳过提问直接发新消息、ask_user
     超限、同批并行调用未执行、中途异常等留下的无响应调用一律补合成存根，
@@ -97,7 +97,7 @@ def build_history(db: DbSession, session: ChatSession) -> list[dict]:
 
 @router.post("/sessions")
 def create_session(body: CreateSessionIn, user: CurrentUser, db: DbSession) -> dict:
-    # 新会话自动绑定车主默认车辆（§6 记忆层 2：按车归档，历史诊断跨会话可查）
+    # 新会话自动绑定车主默认车辆（按车归档，历史诊断跨会话可查）
     default_vehicle_id = db.execute(
         select(OwnerVehicle.vehicle_id)
         .where(OwnerVehicle.owner_id == user.id, OwnerVehicle.is_default.is_(True))
@@ -185,7 +185,7 @@ def list_messages(session_id: int, user: CurrentUser, db: DbSession) -> dict:
 
 
 def _spawn_case_notes_extraction(session_id: int, content: str) -> None:
-    """新会话首条描述 → 本地小模型异步抽取状态卡初稿（§6.1：不阻塞主对话，失败留空）。"""
+    """新会话首条描述 → 本地小模型异步抽取状态卡初稿（不阻塞主对话，失败留空）。"""
 
     async def _run() -> None:
         notes = await extract_case_notes(content)

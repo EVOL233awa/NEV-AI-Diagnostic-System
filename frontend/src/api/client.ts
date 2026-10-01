@@ -149,7 +149,7 @@ export async function kbSearch(query: string, category: string | null, topK: num
   return data.results
 }
 
-/* ---------------- 阶段 4：预约闭环 / 车辆档案 / 成员管理 / 统计审计 ---------------- */
+/* ---------------- 预约闭环 / 车辆档案 / 成员管理 / 统计审计 ---------------- */
 
 /** 本地时间 → 无时区 ISO 串（YYYY-MM-DDTHH:mm:ss）。
  * 不用 toISOString：那是 UTC，会偏移时区且让后端拿到 aware datetime。 */

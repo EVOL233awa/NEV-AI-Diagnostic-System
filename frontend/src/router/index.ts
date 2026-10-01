@@ -20,7 +20,7 @@ const router = createRouter({
       name: 'chat',
       component: () => import('../views/ChatView.vue'),
     },
-    // 车主端（阶段 4）
+    // 车主端
     {
       path: '/my-vehicles',
       name: 'my-vehicles',
@@ -38,7 +38,7 @@ const router = createRouter({
       name: 'settings',
       component: () => import('../views/SettingsView.vue'),
     },
-    // 店员端（阶段 4）
+    // 店员端
     {
       path: '/staff/appointments',
       name: 'staff-appointments',
@@ -57,7 +57,7 @@ const router = createRouter({
       component: () => import('../views/CasesView.vue'),
       meta: { roles: ['staff', 'admin'] },
     },
-    // 管理端（阶段 4）
+    // 管理端
     {
       path: '/admin/kb',
       name: 'admin-kb',

@@ -60,7 +60,7 @@ def test_password_change_roundtrip(client, db_session) -> None:
     # 旧密码失效、新密码可登录
     assert client.post("/api/auth/login", json={"username": "staff001", "password": "staff001"}).status_code == 401
     assert client.post("/api/auth/login", json={"username": "staff001", "password": "new-pass-123"}).status_code == 200
-    # 弱口令口径（阶段 5）：改密码不允许回到「密码 = 账号名」
+    # 弱口令口径：改密码不允许回到「密码 = 账号名」
     assert client.post(
         "/api/auth/change-password", headers=h,
         json={"old_password": "new-pass-123", "new_password": "staff001"},
@@ -82,7 +82,7 @@ def test_session_isolation_between_users(client, owner_headers, staff_headers) -
     assert client.get(f"/api/chat/sessions/{sid}/messages", headers=staff_headers).status_code == 404
 
 
-# ---------- 案例回流全流程（阶段 3 数据飞轮） ----------
+# ---------- 案例回流全流程（数据飞轮） ----------
 
 
 def _make_diag_session(db, owner: User) -> ChatSession:

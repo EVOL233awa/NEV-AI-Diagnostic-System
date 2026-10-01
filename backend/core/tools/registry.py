@@ -1,4 +1,4 @@
-"""Agent 工具层（§3.2 上层）：注册给主模型的工具清单与执行器。
+"""Agent 工具层：注册给主模型的工具清单与执行器。
 
 工具是模型手里随时可调用的能力；执行器只做只读/单步动作，
 决策权（查什么、查几轮、何时下结论）始终归主模型（AstrBot ADR-002 边界）。
@@ -26,7 +26,7 @@ class ToolSpec:
     description: str
     parameters: dict[str, Any]
     handler: Handler
-    # ask_user 单轮上限 3（决策 #13），全工具单轮上限 6（§3.3 安全阀）由 runner 计数
+    # ask_user 单轮上限 3，全工具单轮上限 6 由 runner 计数
     is_interaction: bool = False
 
 
@@ -80,7 +80,7 @@ async def _tool_web_search(db: Session, query: str) -> str:
 
 
 def vehicle_summary_line(db: Session, session: ChatSession) -> str:
-    """当前车主车辆档案 + 近 3 条历史诊断结论（§6 记忆层 2 跨会话归档）。
+    """当前车主车辆档案 + 近 3 条历史诊断结论（跨会话归档）。
     供 get_vehicle_profile 工具与 runner 的状态卡注入块共用；无档案返回空串。"""
     from backend.db.models import Message, OwnerVehicle
 

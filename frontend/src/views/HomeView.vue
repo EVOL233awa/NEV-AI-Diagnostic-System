@@ -6,7 +6,7 @@ import { ROLE_LABELS, auth, logout } from '../stores/auth'
 
 const router = useRouter()
 
-/** 三端功能路线（§9 页面清单）：入口严格按角色隔离——只显示本端已上线的功能，
+/** 三端功能路线：入口严格按角色隔离——只显示本端已上线的功能，
  * 未上线/跨端入口一律不显示（2026-09-26 用户裁定） */
 interface NavItem {
   title: string

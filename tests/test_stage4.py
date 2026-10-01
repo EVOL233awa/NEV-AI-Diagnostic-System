@@ -1,4 +1,4 @@
-"""阶段 4 离线测试：成员管理、预约闭环状态机、车辆双通道、统计与审计。
+"""离线测试：成员管理、预约闭环状态机、车辆双通道、统计与审计。
 
 权限矩阵 + 业务流全部走 TestClient + 临时库，无任何云端调用。
 """
@@ -127,7 +127,7 @@ def test_appointment_full_lifecycle(client, staff_headers, admin_headers, db_ses
     assert r.status_code == 201, r.text
     appt_id = r.json()["id"]
 
-    # 店员队列可见，摘要卡在（决策 #15：摘要卡不受隐私开关影响）
+    # 店员队列可见，摘要卡在（摘要卡不受隐私开关影响）
     queue = client.get("/api/appointments", headers=staff_headers).json()["appointments"]
     row = next(a for a in queue if a["id"] == appt_id)
     assert row["status"] == "pending" and row["summary_card"]["summary"] == "故障701"

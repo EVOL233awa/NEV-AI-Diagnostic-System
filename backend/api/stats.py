@@ -1,4 +1,4 @@
-"""管理端统计看板与审计日志查询（§8：用量统计 = 未来计费基础；§9-13/14）。"""
+"""管理端统计看板与审计日志查询（用量统计 = 未来计费基础）。"""
 from __future__ import annotations
 
 from datetime import datetime, timedelta

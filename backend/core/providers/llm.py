@@ -1,6 +1,6 @@
 """LLM Provider 层：OpenAI 兼容聊天实现的抽象与 DeepSeek 适配。
 
-双 Key 隔离（§4）：主对话用 main_key，后台任务（压缩/标题/抽取）用 background_key。
+双 Key 隔离：主对话用 main_key，后台任务（压缩/标题/抽取）用 background_key。
 流式按 OpenAI SSE 协议解析；usage 统一通过 UsageRecord 回传供 usage_stats 落账。
 """
 from __future__ import annotations

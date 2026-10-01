@@ -1,7 +1,7 @@
-"""知识库摄取：解析(PDF/Word/MD/TXT) → 结构感知分块 → 嵌入 → 双路入库（§3.2）。
+"""知识库摄取：解析(PDF/Word/MD/TXT) → 结构感知分块 → 嵌入 → 双路入库。
 
 结构感知：MD/DOCX 按标题层级切、保留 section_path；PDF 按页 + 页内段落；
-TXT 按空行段落。块长上限 600 字（硬约束放代码层，§6.1）。
+TXT 按空行段落。块长上限 600 字（硬约束放代码层）。
 嵌入失败（本地模型挂）时文档标记 failed、可重试，不阻塞关键词路入库。
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ class ParsedChunk:
 
 
 def _split_long(text: str, limit: int = MAX_CHUNK_CHARS) -> list[str]:
-    """超长段落按句号/换行二次切；无句读边界时按字硬切（块长上限是硬约束，§6.1）。"""
+    """超长段落按句号/换行二次切；无句读边界时按字硬切（块长上限是硬约束）。"""
     if len(text) <= limit:
         return [text]
     pieces: list[str] = []

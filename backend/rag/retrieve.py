@@ -1,9 +1,9 @@
-"""检索：向量路为主路，关键词路为降级保底 → 带引用返回（§3.2 底层）。
+"""检索：向量路为主路，关键词路为降级保底 → 带引用返回。
 
 - 云端 bge-m3 实测纯向量路显著优于双路 RRF 融合（eval_gate：vec_only 100% vs 融合 85%），
   BM25 在当前语料上是负贡献，故健康路径只走向量路（eval_gate.py 同批注释）。
-- 向量路不可达（嵌入服务挂 / 扩展缺失）或零召回时，自动退化为 BM25 关键词路，服务不中断（§4）。
-- 重排默认关（bge-reranker-base 复测不合格，§13-①），预留 rerank 钩子。
+- 向量路不可达（嵌入服务挂 / 扩展缺失）或零召回时，自动退化为 BM25 关键词路，服务不中断。
+- 重排默认关（bge-reranker-base 复测不合格），预留 rerank 钩子。
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from backend.rag.embedder import Embedder, EmbedderUnavailable
 # RRF_K：TREC 缺省 60 适用于大候选池；本系统单店万级块内，K 取小值
 # 拉大头部排名差距——避免单路 rank0 被另一路 rank9+ 的噪声块淹没（实测教训）
 RRF_K = 10
-# 数量漏斗（§6.1 参数经验）：两路各召回候选，融合后取 top_k 注入
+# 数量漏斗：两路各召回候选，融合后取 top_k 注入
 CANDIDATE_PER_LEG = 10
 
 
@@ -73,7 +73,7 @@ def search(
             qvec = embedder.embed([query])[0]
             ranked["vec"] = vecstore.knn_search(db, qvec, CANDIDATE_PER_LEG * 3)
     except EmbedderUnavailable:
-        ranked.pop("vec", None)  # 降级：纯关键词（§4）
+        ranked.pop("vec", None)  # 降级：纯关键词
 
     # 关键词路保底：向量路不可用或零召回时才启用（主路切换依据见模块 docstring）
     if not ranked.get("vec"):

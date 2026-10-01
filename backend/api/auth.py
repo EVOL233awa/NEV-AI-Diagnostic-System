@@ -140,7 +140,7 @@ class PrivacyIn(BaseModel):
 
 @router.patch("/privacy")
 def update_privacy(body: PrivacyIn, user: CurrentUser, db: DbSession) -> dict:
-    """车主隐私开关（决策 #15）：对之后的诊断立即生效。"""
+    """车主隐私开关：对之后的诊断立即生效。"""
     user.privacy_share_dialog = body.privacy_share_dialog
     db.add(AuditLog(user_id=user.id, action="privacy_update", detail={"value": body.privacy_share_dialog}))
     db.commit()

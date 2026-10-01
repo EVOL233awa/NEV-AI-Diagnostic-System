@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 # 表名 -> [(列名, DDL 类型)]
 _PLANNED: dict[str, list[tuple[str, str]]] = {
     "sessions": [
-        ("case_notes", "JSON"),  # 诊断状态卡（§6 会话内记忆，update_case_notes 维护）
-        ("context_summary", "TEXT"),  # 前情摘要（§5 双阀门压缩，阶段 3）
+        ("case_notes", "JSON"),  # 诊断状态卡（update_case_notes 维护）
+        ("context_summary", "TEXT"),  # 前情摘要（双阀门压缩）
         ("summarized_until_id", "INTEGER"),  # 已压缩消息边界
     ],
 }

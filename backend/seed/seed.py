@@ -2,7 +2,7 @@
 
 初始密码 = 账号名（2026-09-26 用户裁定，测试方便）：admin/admin、
 staff001/staff001、user001/user001。config.json 的 seed_admin 节仅作记录，
-不再存随机密码（公开仓库零明文指代码仓库，决策 #18 不受影响）。
+不再存随机密码（公开仓库零明文）。
 
 superadmin 调试账号（2026-09-29 用户裁定，启动脚本 = 最小化 cmd 窗口跑 main.py）：
 密码 20 位随机字母数字，明文存服务器本机 data/config.json 的 superadmin 节
@@ -10,7 +10,7 @@ superadmin 调试账号（2026-09-29 用户裁定，启动脚本 = 最小化 cmd
 **每次启动进程都打印到后端 stdout**（即启动脚本弹出的 cmd 窗口，点开即看）。
 公网环境下面板 /superadmin 仅此角色可进，admin 成员管理对其不可见。
 
-另含演示车辆档案（§6 记忆层 2）：user001 名下绑定一台默认车，
+另含演示车辆档案：user001 名下绑定一台默认车，
 供车辆档案归档与历史诊断跨会话测试。
 """
 from __future__ import annotations

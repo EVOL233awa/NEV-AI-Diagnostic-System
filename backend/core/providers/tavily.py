@@ -1,4 +1,4 @@
-"""Tavily 联网检索（web_search 主力通道，§7）。
+"""Tavily 联网检索（web_search 主力通道）。
 
 免费额度用尽 / key 失效时返回不可用标志，Agent 层转为如实说明的工具结果，不硬失败。
 权威域名优先：可信域加权上浮，内容农场下沉，零价值域（财经行情/搜索结果页/文档农场）硬剔除。
@@ -13,7 +13,7 @@ from backend.config import settings
 
 TAVILY_ENDPOINT = "https://api.tavily.com/search"
 
-# 排序加权：车企官方/标准组织/专业站优先（§7 权威域名优先）
+# 排序加权：车企官方/标准组织/专业站优先（权威域名优先）
 DOMAIN_BOOST = {
     "gbstandard": ["std.samr.gov.cn", "openstd.samr.gov.cn"],
     "oem": ["byd.com", "tesla.com", "saicmotor.com", "geely.com", "nio.com", "nio.cn", "xpeng.com", "lixiang.com"],

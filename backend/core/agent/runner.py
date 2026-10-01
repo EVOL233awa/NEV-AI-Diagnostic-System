@@ -1,4 +1,4 @@
-"""Agentic 循环编排（§3.3）。
+"""Agentic 循环编排。
 
 流程：系统提示词（触发策略+当前日期+无证据不下结论）→ 主模型流式输出 →
 tool_calls 执行回填 → 循环（安全阀：工具调用 ≤max_tool_rounds 次/轮、
@@ -198,7 +198,7 @@ class AgentRunner:
         )
 
     def build_system_prompt(self) -> str:
-        # 状态卡不放 system（每轮变化会破坏 DeepSeek 前缀缓存），改为末尾临时注入（§6.1）
+        # 状态卡不放 system（每轮变化会破坏 DeepSeek 前缀缓存），改为末尾临时注入
         return SYSTEM_PROMPT_TEMPLATE.format(today=datetime.now().strftime("%Y-%m-%d"))
 
     def _merge_case_notes(self, session: ChatSession, args: dict) -> None:
@@ -226,7 +226,7 @@ class AgentRunner:
         session.case_notes = notes
 
     def _build_tail_block(self, db: Session, session: ChatSession) -> str:
-        """每轮临时注入块（mark_as_temp 式，§6.1）：状态卡 + 车辆档案一行摘要 + 历史诊断。
+        """每轮临时注入块（mark_as_temp 式）：状态卡 + 车辆档案一行摘要 + 历史诊断。
         拼在上下文最尾端、不写入对话历史；无任何信息时不注入。"""
         from backend.core.tools.registry import vehicle_summary_line
 
@@ -276,7 +276,7 @@ class AgentRunner:
             tool_specs_to_openai(self.specs) + [ASK_USER_TOOL_SPEC, UPDATE_CASE_NOTES_SPEC]
         )
         messages: list[dict] = [{"role": "system", "content": self.build_system_prompt()}]
-        # 双阀门压缩（§5）：超轮数/token 先截断并摘要，再进上下文
+        # 双阀门压缩：超轮数/token 先截断并摘要，再进上下文
         from backend.core.agent.compressor import maybe_compress
 
         history = await maybe_compress(db, session, history)
@@ -464,7 +464,7 @@ class AgentRunner:
                         result = f"工具参数错误：{exc}"
                     except Exception as exc:  # noqa: BLE001  工具故障转为工具结果，循环不崩
                         result = f"工具执行失败：{exc}。请换用其他工具或基于已有证据作答。"
-                result = result[:tool_result_max_chars]  # 单轮工具结果预算（§6.1 ≤4k token 上限的近似）
+                result = result[:tool_result_max_chars]  # 单轮工具结果预算（≤4k token 上限的近似）
                 await emit("tool_result", {"name": tc.name, "result": result[:300]})
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
                 db.add(

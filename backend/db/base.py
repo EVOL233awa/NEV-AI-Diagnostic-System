@@ -15,7 +15,7 @@ engine = create_engine(
 )
 
 # sqlite-vec 扩展：每个连接都要加载一次（向量检索路）。
-# 加载失败不致命：retrieve 层据此退化为纯关键词路（§4 商用容错）。
+# 加载失败不致命：retrieve 层据此退化为纯关键词路（商用容错）。
 VEC_AVAILABLE = True
 try:
     import sqlite_vec

@@ -1,4 +1,4 @@
-"""sqlite-vec 单文件向量库封装（§3.2 底层语义路）。
+"""sqlite-vec 单文件向量库封装（底层语义路）。
 
 vec_chunks 虚拟表：rowid = kb_chunks.id，embedding float[1024]（bge-m3 实测维度）。
 扩展加载失败（VEC_AVAILABLE=False）时本模块全部操作空转，上层退化纯关键词路。
