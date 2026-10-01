@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.2] - 2026-10-02
 
-RAG 检索降级链优化：jieba 分词词典优化 + 嵌入缓存 + 检索档位日志。
+**RAG 检索降级链优化**：jieba 分词词典优化 + 嵌入缓存 + 检索档位日志
 
 ### Added
 
