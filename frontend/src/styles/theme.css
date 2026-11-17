@@ -10,3 +10,7 @@
   --user-bg: #123a34;
   --assistant-bg: var(--hmi-surface-2);
 }
+
+html.light {
+  --user-bg: #d9f2ec;
+}

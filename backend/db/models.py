@@ -37,10 +37,12 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(256))
     role: Mapped[str] = mapped_column(String(16))  # owner / staff / admin
     display_name: Mapped[str] = mapped_column(String(64), default="")
-    # 店员可见我的对话记录，默认开启
+    # 工作人员（店员与管理员）可见我的对话记录，默认开启
     privacy_share_dialog: Mapped[bool] = mapped_column(Boolean, default=True)
-    # 管理员可查看我的对话原文（质量复核用），默认关闭；阶段/摘要/证据链不受此开关影响
+    # 管理员原文可见性：已并入 privacy_share_dialog，保留列仅作历史兼容并保持同步
     privacy_share_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 界面主题偏好：system（跟随系统，默认）/ dark / light
+    theme: Mapped[str] = mapped_column(String(16), default="system")
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

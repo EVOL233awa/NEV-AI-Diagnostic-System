@@ -214,9 +214,9 @@ async function onClick(): Promise<void> {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  border: 1px solid var(--line, #2a3a3a);
-  background: var(--panel, #0f1a18);
-  color: var(--text, #e6f2ee);
+  border: 1px solid var(--hmi-line);
+  background: var(--hmi-surface);
+  color: var(--hmi-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -225,11 +225,11 @@ async function onClick(): Promise<void> {
 }
 
 .voice-btn:hover:not(:disabled) {
-  border-color: var(--accent, #2dd4a8);
+  border-color: var(--hmi-accent);
 }
 
 .voice-btn:focus-visible {
-  outline: 2px solid var(--accent, #2dd4a8);
+  outline: 2px solid var(--hmi-accent);
   outline-offset: 2px;
 }
 

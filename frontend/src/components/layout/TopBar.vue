@@ -103,7 +103,7 @@ onBeforeUnmount(() => {
   min-block-size: var(--hmi-topbar-h);
   padding: 0.5rem clamp(0.75rem, 2vw, 1.4rem);
   border-block-end: 1px solid var(--hmi-line);
-  background: rgba(8, 13, 16, 0.78);
+  background: var(--hmi-chrome-bg);
   backdrop-filter: blur(12px);
 }
 

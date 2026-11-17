@@ -20,13 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **用量与限额**：搜索/ASR 写 `usage_stats`（次数/时长/成本，人民币计价），支持每用户每日搜索次数、ASR 秒数、全局每日预算（元）；默认三项 `null` 不限制；限额拒绝写审计。
 - **superadmin 调试后台扩展**：搜索/ASR 供应商、限额、主模型 `aux_key`、固定密码来源展示与在线修改；配置 GET 全量掩码，PUT 留空保持、`__clear__` 清除。
 - **C HMI 设计系统**：17 条路由统一 AppShell / SideNav / TopBar / MobileTabBar，五档宽度适配、打印浅色主题、`prefers-reduced-motion`、44px 触控目标、跳过链接与焦点轮廓。
+- **外观主题**：设置页提供跟随系统（默认）/ 浅色 / 深色三档，偏好随账号保存（`PATCH /api/auth/preferences`），登录后自动应用并跟随系统外观变化。
 - **安全加固**：CSP 与安全响应头、HSTS（HTTPS）、KB/ASR 上传体积与类型限制、案例沉淀隐私门槛、限额拒绝审计。
 
 ### Changed
 
 - `data/config.json` 升级为 schema v2；启动时自动迁移、备份并原子写回。
 - superadmin 密码仅首次生成时打印；env/config 来源不回显。
-- 管理端诊断详情新增 `privacy_share_admin` 原文授权，默认仅显示脱敏内容。
+- 管理端诊断详情按车主「工作人员可见我的对话记录」授权展示原文，未授权时整段脱敏。
+- 车主隐私授权合并为单一「工作人员可见我的对话记录」开关，店员与管理员共用；设置页移除「外观与可访问性」说明清单。
+- 「我的车辆 → 最近诊断」移除独立完整历史弹窗；展开历史后可直接点击单条查看该次诊断详情。
+- 首页不再向车主 / 店员 / 管理员展示模型名称，模型信息仅保留在 superadmin 后台。
 - 前端浏览器标题/PWA manifest/包版本统一为 2.1；README / 技术架构 / 操作指南与操作截图同步本轮 UI。
 
 ### Fixed

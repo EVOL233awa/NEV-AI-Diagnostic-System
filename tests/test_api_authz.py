@@ -92,6 +92,43 @@ def test_password_change_roundtrip(client, db_session) -> None:
     assert client.post("/api/auth/login", json={"username": "staff001", "password": "staff001"}).status_code == 200
 
 
+def test_privacy_single_switch_syncs_both_flags(client, db_session, owner_headers) -> None:
+    """车主只有一个授权开关：写 dialog 时 admin 同步，管理员质控按同一授权判断。"""
+    r = client.patch("/api/auth/privacy", headers=owner_headers, json={"privacy_share_dialog": False})
+    assert r.status_code == 200
+    assert r.json()["privacy_share_dialog"] is False
+    db_session.expire_all()
+    user = db_session.query(User).filter(User.username == "user001").one()
+    assert user.privacy_share_dialog is False and user.privacy_share_admin is False
+
+    r = client.patch("/api/auth/privacy", headers=owner_headers, json={"privacy_share_dialog": True})
+    assert r.status_code == 200
+    db_session.expire_all()
+    user = db_session.query(User).filter(User.username == "user001").one()
+    assert user.privacy_share_dialog is True and user.privacy_share_admin is True
+
+    # 旧字段仍可写入，但语义与单一开关一致
+    r = client.patch("/api/auth/privacy", headers=owner_headers, json={"privacy_share_admin": False})
+    assert r.status_code == 200
+    db_session.expire_all()
+    user = db_session.query(User).filter(User.username == "user001").one()
+    assert user.privacy_share_dialog is False and user.privacy_share_admin is False
+    client.patch("/api/auth/privacy", headers=owner_headers, json={"privacy_share_dialog": True})
+
+
+def test_theme_preference_roundtrip(client, owner_headers) -> None:
+    assert client.get("/api/auth/me", headers=owner_headers).json()["user"]["theme"] == "system"
+    r = client.patch("/api/auth/preferences", headers=owner_headers, json={"theme": "light"})
+    assert r.status_code == 200 and r.json()["theme"] == "light"
+    assert client.get("/api/auth/me", headers=owner_headers).json()["user"]["theme"] == "light"
+    assert client.patch(
+        "/api/auth/preferences", headers=owner_headers, json={"theme": "blue"},
+    ).status_code == 422
+    assert client.patch(
+        "/api/auth/preferences", headers=owner_headers, json={"theme": "system"},
+    ).json()["theme"] == "system"
+
+
 def test_session_isolation_between_users(client, owner_headers, staff_headers) -> None:
     r = client.post("/api/chat/sessions", headers=owner_headers, json={"title": "隔离测试"})
     assert r.status_code == 200

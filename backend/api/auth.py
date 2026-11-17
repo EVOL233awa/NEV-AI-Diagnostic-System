@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import threading
 from datetime import datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -85,6 +86,7 @@ def _user_payload(user: User) -> dict:
         "display_name": user.display_name or user.username,
         "privacy_share_dialog": user.privacy_share_dialog,
         "privacy_share_admin": user.privacy_share_admin,
+        "theme": user.theme or "system",
     }
 
 
@@ -136,29 +138,48 @@ def me(user: CurrentUser) -> dict:
 
 
 class PrivacyIn(BaseModel):
+    """车主单一授权：工作人员（店员与管理员）是否可见对话原文。
+
+    为兼容旧前端仍接受 privacy_share_admin，但语义与 privacy_share_dialog 相同，
+    两者始终同步写入。
+    """
+
     privacy_share_dialog: bool | None = None
     privacy_share_admin: bool | None = None
 
 
 @router.patch("/privacy")
 def update_privacy(body: PrivacyIn, user: CurrentUser, db: DbSession) -> dict:
-    """车主隐私开关：两个开关互不影响，分开更新、分开审计。"""
-    if body.privacy_share_dialog is None and body.privacy_share_admin is None:
+    """单一授权开关：同时更新店员与管理员可见性，并写一条审计。"""
+    value = body.privacy_share_dialog if body.privacy_share_dialog is not None else body.privacy_share_admin
+    if value is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "没有需要更新的隐私设置")
-    if body.privacy_share_dialog is not None:
-        user.privacy_share_dialog = body.privacy_share_dialog
-        db.add(AuditLog(user_id=user.id, action="privacy_update",
-                        detail={"field": "privacy_share_dialog", "value": body.privacy_share_dialog}))
-    if body.privacy_share_admin is not None:
-        user.privacy_share_admin = body.privacy_share_admin
-        db.add(AuditLog(user_id=user.id, action="privacy_update",
-                        detail={"field": "privacy_share_admin", "value": body.privacy_share_admin}))
+    user.privacy_share_dialog = value
+    user.privacy_share_admin = value
+    db.add(AuditLog(user_id=user.id, action="privacy_update",
+                    detail={"field": "privacy_share_staff", "value": value}))
     db.commit()
     return {
         "ok": True,
         "privacy_share_dialog": user.privacy_share_dialog,
         "privacy_share_admin": user.privacy_share_admin,
     }
+
+
+class PreferencesIn(BaseModel):
+    theme: Literal["system", "light", "dark"] | None = None
+
+
+@router.patch("/preferences")
+def update_preferences(body: PreferencesIn, user: CurrentUser, db: DbSession) -> dict:
+    """界面偏好：主题可为跟随系统（默认）/ 浅色 / 深色。"""
+    if body.theme is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "没有需要更新的偏好设置")
+    user.theme = body.theme
+    db.add(AuditLog(user_id=user.id, action="preferences_update",
+                    detail={"field": "theme", "value": body.theme}))
+    db.commit()
+    return {"ok": True, "theme": user.theme}
 
 
 @router.post("/change-password")

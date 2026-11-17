@@ -1,7 +1,7 @@
 """管理员「诊断质控」接口：阶段时间线、假设↔证据映射、受控原文。
 
 - 全部接口 require_roles("admin")，按 tenant_id 隔离。
-- 对话原文仅在车主 privacy_share_admin=true 时返回；未授权时 query 脱敏、
+- 对话原文仅在车主 privacy_share_dialog=true 时返回；未授权时 query 脱敏、
   网页证据只显示域名，避免车牌/VIN/症状原文泄漏。
 - 证据链只读 retrieval_traces，不回填、不猜测；模型未输出编号的假设标记「未关联证据」。
 """
@@ -100,7 +100,7 @@ def _session_row(db, session: ChatSession, owner: User | None, vehicle: VehicleP
         "owner": {
             "id": owner.id if owner else None,
             "username": (owner.display_name or owner.username) if owner else "",
-            "privacy_share_admin": bool(owner.privacy_share_admin) if owner else False,
+            "privacy_share_admin": bool(owner.privacy_share_dialog) if owner else False,
         },
         "vehicle": {
             "id": vehicle.id,
@@ -247,7 +247,7 @@ def diagnosis_detail(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在")
     owner = db.get(User, session.user_id)
     vehicle = db.get(VehicleProfile, session.vehicle_id) if session.vehicle_id else None
-    raw_included = bool(owner and owner.privacy_share_admin)
+    raw_included = bool(owner and owner.privacy_share_dialog)
     stage = _stage_info(db, session)
 
     rows = db.execute(

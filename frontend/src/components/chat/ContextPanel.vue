@@ -15,7 +15,6 @@ const props = defineProps<{
   stages: StageStep[]
   tools: { name: string; brief: string; done: boolean }[]
   privacyDialog?: boolean
-  privacyAdmin?: boolean
 }>()
 
 const vehicleTitle = computed(() => {
@@ -78,7 +77,7 @@ const vehicleTitle = computed(() => {
 
     <section v-if="role === 'owner'" class="card">
       <h3>隐私与预约</h3>
-      <p class="muted small">店员可见范围：{{ privacyDialog ? '完整对话' : '仅诊断摘要' }}；管理员原文：{{ privacyAdmin ? '已授权' : '仅脱敏' }}。</p>
+      <p class="muted small">工作人员可见范围：{{ privacyDialog ? '完整对话' : '仅诊断摘要' }}。</p>
       <div class="quick-links">
         <RouterLink to="/settings">隐私设置</RouterLink>
         <RouterLink to="/appointments">我的预约</RouterLink>

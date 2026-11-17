@@ -111,7 +111,7 @@ class TestStageFallback:
 class TestDetailPrivacy:
     def test_unauthorized_redacts_content_and_query(self, client, db_session, admin_headers):
         owner = _owner(db_session)
-        owner.privacy_share_admin = False
+        owner.privacy_share_dialog = False
         db_session.commit()
         session = _session(db_session, owner=owner, title="质控隐私-未授权")
         _message(db_session, session, "user", "我的车牌桂A12345，电池故障")
@@ -149,7 +149,7 @@ class TestDetailPrivacy:
 
     def test_authorized_shows_raw_text(self, client, db_session, admin_headers):
         owner = _owner(db_session)
-        owner.privacy_share_admin = True
+        owner.privacy_share_dialog = True
         db_session.commit()
         session = _session(db_session, owner=owner, title="质控隐私-已授权")
         _message(db_session, session, "user", "我的车牌桂A12345，电池故障")
@@ -163,7 +163,7 @@ class TestDetailPrivacy:
         trace = detail["traces"][0]
         assert "桂A12345" in trace["query"]
         assert trace["snippet"] == "知识库原文片段"
-        owner.privacy_share_admin = False
+        owner.privacy_share_dialog = False
         db_session.commit()
 
 

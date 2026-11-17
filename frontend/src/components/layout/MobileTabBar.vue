@@ -75,7 +75,7 @@ function isActive(to: string): boolean {
   min-block-size: var(--hmi-tabbar-h);
   padding-block-end: env(safe-area-inset-bottom, 0px);
   border-block-start: 1px solid var(--hmi-line);
-  background: rgba(9, 15, 19, 0.94);
+  background: var(--hmi-chrome-bg-strong);
   backdrop-filter: blur(14px);
 }
 

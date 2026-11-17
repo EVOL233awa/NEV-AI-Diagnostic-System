@@ -53,7 +53,7 @@ const isChat = computed(() => route.path === '/chat')
   block-size: 100vh;
   block-size: 100dvh;
   border-inline-end: 1px solid var(--hmi-line);
-  background: rgba(9, 15, 19, 0.82);
+  background: var(--hmi-chrome-bg-strong);
   backdrop-filter: blur(10px);
   z-index: 20;
 }

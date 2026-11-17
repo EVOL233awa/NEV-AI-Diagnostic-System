@@ -71,7 +71,7 @@ The system runs on **three models + external services**: main model (chat; `aux_
 - **Voice input**: browser records 16 kHz mono WAV → `/api/asr/transcribe` → text inserted into the composer (never auto-sent); DeepSeek official ASR or OpenAI-compatible endpoints; audio is not persisted and transcripts are not logged.
 - **Compression & three-layer memory**: automatic summary for long chats; in-session diagnostic state card, cross-session vehicle profile, staff-contributed cases. Case contribution requires a completed appointment and owner consent.
 - **Appointment loop**: diagnostic card → booking → staff accept/reschedule → repair result → case contribution → printable HTML report; state machine enforced; 30s new-order polling.
-- **Privacy boundaries**: the diagnostic summary card is always visible to staff; raw dialog is gated by the owner's `privacy_share_dialog` flag (backend 403). Admin raw-dialog access has a separate `privacy_share_admin` flag, default off; API redacts and audits.
+- **Privacy boundaries**: the diagnostic summary card is always visible to staff; raw dialog is gated by the owner's single `privacy_share_dialog` consent for both staff and admins (backend 403). When off, the API redacts and audits.
 - **Usage & quotas**: every search/ASR call writes `usage_stats` (calls, duration, estimated cost in CNY); superadmin can set per-user daily search calls, ASR seconds and a global daily budget (CNY). All three default to `null` (unlimited). Quota rejections are audited.
 - **C HMI design system**: 17 routes share AppShell / side nav / top bar / mobile tab bar; five widths (360/390/768/1024/1440) with zero horizontal overflow; dark cockpit theme, print theme, keyboard focus and 44px touch targets.
 - **Security & audit**: JWT role-based authorization, PBKDF2 passwords, login throttling, CSP/security headers, upload limits, atomic config writes; login, account changes, appointment transitions, privacy changes, case contribution, admin diagnosis views and quota rejections are audited.
@@ -217,7 +217,7 @@ The backend is pure orchestration and holds no model compute: main/embedding/rer
 - **Secrets**: backend-only config; zero secrets in the frontend build; atomic config writes preserve the old file on failure.
 - **Auth**: PBKDF2-SHA256 (240k iterations) + 7-day JWT; owner/staff/admin/superadmin authorization at the API layer; superadmin group isolated from admins.
 - **Login throttling**: 5 failures in 15 minutes locks the account temporarily; lock events are audited. Single-process in-memory implementation.
-- **Privacy**: owner raw dialog gated by `privacy_share_dialog`; admin raw dialog by `privacy_share_admin` (default off) with API redaction and audit. Case contribution requires a completed appointment and owner consent.
+- **Privacy**: owner raw dialog is gated by one consent flag (`privacy_share_dialog`) shared by staff and admins, with API redaction and audit. Case contribution requires a completed appointment and owner consent.
 - **Headers**: CSP (`script-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`; HSTS on HTTPS.
 - **Uploads**: KB 20 MiB / 2,000,000 chars; ASR 8 MiB + magic-byte type checks; neither writes files to disk.
 - **Audit**: logins, account changes, appointment transitions, privacy changes, case contribution, admin diagnosis views and quota rejections are recorded.

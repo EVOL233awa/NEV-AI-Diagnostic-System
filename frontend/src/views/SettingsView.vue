@@ -4,35 +4,29 @@ import { ElMessage } from 'element-plus'
 import { updatePrivacy } from '../api/client'
 import PageHeader from '../components/layout/PageHeader.vue'
 import StatusChip from '../components/StatusChip.vue'
+import { useTheme } from '../composables/useTheme'
 import { ROLE_LABELS, auth, patchStoredUser } from '../stores/auth'
 
 const isOwner = computed(() => auth.user?.role === 'owner')
-const sharing = ref(auth.user?.privacy_share_dialog ?? true)
-const adminSharing = ref(auth.user?.privacy_share_admin ?? false)
+const staffSharing = ref(auth.user?.privacy_share_dialog ?? true)
+const { theme, setTheme } = useTheme()
 
-async function onDialogPrivacyChange(value: boolean): Promise<void> {
+async function onStaffPrivacyChange(value: boolean): Promise<void> {
   const prev = !value
   try {
     await updatePrivacy({ privacy_share_dialog: value })
-    sharing.value = value
-    patchStoredUser({ privacy_share_dialog: value })
-    ElMessage.success(value ? '已开启：店员可查看对话记录' : '已关闭：店员仅能查看诊断摘要')
+    staffSharing.value = value
+    patchStoredUser({ privacy_share_dialog: value, privacy_share_admin: value })
+    ElMessage.success(value ? '已开启：工作人员可查看对话记录' : '已关闭：工作人员仅能查看诊断摘要')
   } catch {
-    sharing.value = prev
+    staffSharing.value = prev
     ElMessage.error('保存失败，请重试')
   }
 }
 
-async function onAdminPrivacyChange(value: boolean): Promise<void> {
-  const prev = !value
-  try {
-    await updatePrivacy({ privacy_share_admin: value })
-    adminSharing.value = value
-    patchStoredUser({ privacy_share_admin: value })
-    ElMessage.success(value ? '已授权：管理员可查看对话原文' : '已关闭：管理员仅看阶段、摘要与证据链')
-  } catch {
-    adminSharing.value = prev
-    ElMessage.error('保存失败，请重试')
+function onThemeChange(value: string | number | boolean): void {
+  if (value === 'system' || value === 'light' || value === 'dark') {
+    void setTheme(value)
   }
 }
 
@@ -88,31 +82,17 @@ function extractError(e: unknown): string {
 
       <div class="privacy-row">
         <div class="privacy-copy">
-          <p class="label">店员可见我的对话记录</p>
+          <p class="label">工作人员可见我的对话记录</p>
           <p class="desc">
-            开启后，接待您的服务人员可以查看本次诊断的完整对话过程，便于提前准备配件、到店无需重复描述；
-            关闭后，店员仅能看到 AI 生成的诊断摘要（不含您的原话）。
+            开启后，接待您的服务人员与诊断质控人员可以查看本次诊断的完整对话过程，便于提前准备配件、
+            到店无需重复描述与质量复核；关闭后，工作人员仅能看到 AI 生成的诊断摘要（不含您的原话）。
           </p>
         </div>
-        <el-switch v-model="sharing" aria-label="店员可见我的对话记录" @change="onDialogPrivacyChange" />
-      </div>
-
-      <hr class="hmi-divider" />
-
-      <div class="privacy-row">
-        <div class="privacy-copy">
-          <p class="label">管理员可查看我的对话原文</p>
-          <p class="desc">
-            仅用于服务质控与诊断质量复核，默认关闭。关闭时管理员只能看到诊断阶段、严重度摘要、
-            证据来源与假设映射（不含原话、车牌、VIN 与网页检索词）；开启后可查看完整对话与检索片段。
-          </p>
-        </div>
-        <el-switch v-model="adminSharing" aria-label="管理员可查看我的对话原文" @change="onAdminPrivacyChange" />
+        <el-switch v-model="staffSharing" aria-label="工作人员可见我的对话记录" @change="onStaffPrivacyChange" />
       </div>
 
       <div class="privacy-summary">
-        <StatusChip :label="sharing ? '店员：完整对话' : '店员：仅摘要'" :tone="sharing ? 'accent' : 'neutral'" dot />
-        <StatusChip :label="adminSharing ? '管理员：可看原文' : '管理员：仅脱敏'" :tone="adminSharing ? 'warn' : 'ok'" dot />
+        <StatusChip :label="staffSharing ? '工作人员：完整对话' : '工作人员：仅摘要'" :tone="staffSharing ? 'accent' : 'neutral'" dot />
       </div>
     </section>
 
@@ -133,13 +113,18 @@ function extractError(e: unknown): string {
     </section>
 
     <section class="panel hmi-card">
-      <div class="panel-head"><h3>外观与可访问性</h3></div>
-      <ul class="appearance-list">
-        <li><span>界面主题</span><strong>C HMI 深色座舱（固定）</strong></li>
-        <li><span>键盘操作</span><strong>Tab 可到达主要操作，焦点高亮</strong></li>
-        <li><span>动效</span><strong>跟随系统「减少动态效果」设置</strong></li>
-        <li><span>触控</span><strong>粗指针设备自动放大到 44px 目标</strong></li>
-      </ul>
+      <div class="panel-head"><h3>外观</h3></div>
+      <div class="privacy-row theme-row">
+        <div class="privacy-copy">
+          <p class="label">界面主题</p>
+          <p class="desc">默认跟随系统外观自动切换；也可固定为浅色或深色，偏好随账号保存。</p>
+        </div>
+        <el-radio-group :model-value="theme" aria-label="界面主题" @change="onThemeChange">
+          <el-radio-button value="system">跟随系统</el-radio-button>
+          <el-radio-button value="light">浅色</el-radio-button>
+          <el-radio-button value="dark">深色</el-radio-button>
+        </el-radio-group>
+      </div>
     </section>
   </div>
 </template>
@@ -222,46 +207,18 @@ function extractError(e: unknown): string {
   border-block-start: 1px solid var(--hmi-line-soft);
 }
 
-.hmi-divider {
-  margin-block: 0.7rem;
-}
-
 .pwd-form {
   max-inline-size: 380px;
-}
-
-.appearance-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.appearance-list li {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.7rem;
-  font-size: var(--hmi-fs-2);
-  padding-block-end: 0.4rem;
-  border-block-end: 1px solid var(--hmi-line-soft);
-}
-
-.appearance-list span {
-  color: var(--hmi-text-3);
-}
-
-.appearance-list strong {
-  color: var(--hmi-text-2);
-  font-weight: 500;
-  text-align: end;
 }
 
 @media (max-width: 560px) {
   .privacy-row {
     gap: 0.8rem;
+  }
+
+  .theme-row {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

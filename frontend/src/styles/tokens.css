@@ -82,6 +82,55 @@
 
   /* 触摸目标 */
   --hmi-target: 32px;
+
+  /* 顶栏/侧栏/底栏的半透明底色（浅色主题单独覆写） */
+  --hmi-chrome-bg: rgba(8, 13, 16, 0.78);
+  --hmi-chrome-bg-strong: rgba(9, 15, 19, 0.94);
+}
+
+/* 浅色主题：保持同一套令牌，仅替换表面、文本与语义色 */
+html.light {
+  color-scheme: light;
+
+  --hmi-bg: #f2f6f7;
+  --hmi-bg-deep: #e7eef1;
+  --hmi-bg-glow-a: rgba(13, 148, 136, 0.08);
+  --hmi-bg-glow-b: rgba(37, 99, 235, 0.06);
+  --hmi-surface: #ffffff;
+  --hmi-surface-2: #f4f8f9;
+  --hmi-surface-3: #eaf1f3;
+  --hmi-surface-hover: #eef4f6;
+  --hmi-line: #cfdde3;
+  --hmi-line-soft: rgba(23, 56, 68, 0.12);
+  --hmi-line-strong: rgba(23, 56, 68, 0.28);
+
+  --hmi-text: #15262d;
+  --hmi-text-2: #3b535e;
+  --hmi-text-3: #627b86;
+  --hmi-muted: #738b95;
+  --hmi-on-accent: #041614;
+
+  --hmi-accent: #0d9488;
+  --hmi-accent-strong: #0f766e;
+  --hmi-accent-dim: #5fb9ad;
+  --hmi-accent-soft: rgba(13, 148, 136, 0.10);
+  --hmi-accent-line: rgba(13, 148, 136, 0.35);
+  --hmi-info: #2563eb;
+  --hmi-info-soft: rgba(37, 99, 235, 0.10);
+  --hmi-ok: #15803d;
+  --hmi-ok-soft: rgba(21, 128, 61, 0.10);
+  --hmi-warn: #b45309;
+  --hmi-warn-soft: rgba(180, 83, 9, 0.10);
+  --hmi-danger: #b91c1c;
+  --hmi-danger-soft: rgba(185, 28, 28, 0.10);
+  --hmi-neutral-soft: rgba(23, 56, 68, 0.08);
+
+  --hmi-shadow-1: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 24px rgba(27, 55, 66, 0.08);
+  --hmi-shadow-2: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 18px 48px rgba(27, 55, 66, 0.14);
+  --hmi-shadow-accent: 0 0 0 1px var(--hmi-accent-line), 0 8px 28px rgba(13, 148, 136, 0.12);
+
+  --hmi-chrome-bg: rgba(255, 255, 255, 0.82);
+  --hmi-chrome-bg-strong: rgba(255, 255, 255, 0.94);
 }
 
 @media (pointer: coarse) {

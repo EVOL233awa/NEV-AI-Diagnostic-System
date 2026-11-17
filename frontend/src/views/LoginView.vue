@@ -3,6 +3,7 @@ import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { login } from '../api/client'
+import { applyUserTheme } from '../composables/useTheme'
 import { setAuth } from '../stores/auth'
 
 const router = useRouter()
@@ -24,6 +25,7 @@ async function onSubmit(): Promise<void> {
   try {
     const resp = await login(form.username.trim(), form.password)
     setAuth(resp.token, resp.user)
+    applyUserTheme(resp.user.theme)
     ElMessage.success(`欢迎，${resp.user.display_name}`)
     router.push({ name: 'home' })
   } catch (err: unknown) {
@@ -226,6 +228,21 @@ async function onSubmit(): Promise<void> {
   border-radius: var(--hmi-radius);
   background: rgba(15, 23, 29, 0.6);
   font-size: var(--hmi-fs-2);
+}
+
+html.light .intro {
+  background:
+    radial-gradient(ellipse 70% 60% at 18% 18%, rgba(13, 148, 136, 0.12), transparent 62%),
+    radial-gradient(ellipse 60% 50% at 88% 80%, rgba(37, 99, 235, 0.08), transparent 60%),
+    linear-gradient(160deg, #ffffff, #eef4f6 70%);
+}
+
+html.light .line-car {
+  color: rgba(23, 56, 68, 0.18);
+}
+
+html.light .roles li {
+  background: var(--hmi-surface);
 }
 
 .roles strong {

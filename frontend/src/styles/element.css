@@ -1,4 +1,14 @@
 /* Element Plus 暗色覆写：把组件外观收口到 C HMI 令牌。 */
+html.light {
+  --el-color-primary: var(--hmi-accent);
+  --el-color-primary-light-3: #3fb3a7;
+  --el-color-primary-light-5: #7accc3;
+  --el-color-primary-light-7: #b3e3dd;
+  --el-color-primary-light-8: #cdece8;
+  --el-color-primary-light-9: #e6f4f2;
+  --el-color-primary-dark-2: var(--hmi-accent-strong);
+}
+
 html.dark {
   --el-color-primary: var(--hmi-accent);
   --el-color-primary-light-3: #2cb9a8;

@@ -10,5 +10,7 @@ import './styles/base.css'
 import './styles/element.css'
 import './styles/theme.css'
 import './styles/print.css'
+import { initTheme } from './composables/useTheme'
 
+initTheme()
 createApp(App).use(router).use(ElementPlus, { locale: zhCn }).mount('#app')

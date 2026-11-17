@@ -159,12 +159,6 @@ onMounted(load)
   <div class="page">
     <PageHeader :title="title" :subtitle="`${auth.user?.display_name || auth.user?.username}，欢迎回来`">
       <template #actions>
-        <StatusChip
-          v-if="health"
-          :label="health.providers.main_model || '主模型未配置'"
-          :tone="health.ok ? (health.providers.main_model ? 'accent' : 'warn') : 'danger'"
-          dot
-        />
         <el-button v-if="role === 'owner'" type="primary" :icon="ChatDotRound" @click="go('/chat')">
           开始诊断
         </el-button>
@@ -223,7 +217,7 @@ onMounted(load)
         </button>
         <button type="button" class="quick" @click="go('/my-vehicles')">
           <el-icon aria-hidden="true"><Van /></el-icon>
-          <strong>车辆档案</strong><span>里程与完整诊断历史</span>
+          <strong>车辆档案</strong><span>里程与诊断历史</span>
         </button>
         <button type="button" class="quick" @click="go('/appointments')">
           <el-icon aria-hidden="true"><Tickets /></el-icon>
@@ -231,7 +225,7 @@ onMounted(load)
         </button>
         <button type="button" class="quick" @click="go('/settings')">
           <el-icon aria-hidden="true"><Setting /></el-icon>
-          <strong>隐私设置</strong><span>{{ auth.user?.privacy_share_dialog ? '店员可见对话' : '仅诊断摘要' }}</span>
+          <strong>隐私设置</strong><span>{{ auth.user?.privacy_share_dialog ? '工作人员可见对话' : '仅诊断摘要' }}</span>
         </button>
       </section>
 
@@ -268,12 +262,8 @@ onMounted(load)
           <hr class="hmi-divider" />
           <ul class="privacy-list">
             <li>
-              <StatusChip :label="auth.user?.privacy_share_dialog ? '店员可见对话' : '店员仅看摘要'" :tone="auth.user?.privacy_share_dialog ? 'accent' : 'neutral'" />
-              <span>到店前服务顾问可查看的范围</span>
-            </li>
-            <li>
-              <StatusChip :label="auth.user?.privacy_share_admin ? '管理员可看原文' : '管理员仅看脱敏'" :tone="auth.user?.privacy_share_admin ? 'warn' : 'ok'" />
-              <span>诊断质控时的原文授权</span>
+              <StatusChip :label="auth.user?.privacy_share_dialog ? '工作人员可见对话' : '工作人员仅看摘要'" :tone="auth.user?.privacy_share_dialog ? 'accent' : 'neutral'" />
+              <span>到店与质控时可查看的对话范围</span>
             </li>
           </ul>
           <el-button text type="primary" size="small" @click="go('/settings')">调整隐私设置</el-button>
@@ -361,9 +351,8 @@ onMounted(load)
         <section class="panel hmi-card">
           <div class="panel-head"><h3>系统状态</h3><StatusChip :label="health?.ok ? '运行正常' : '异常'" :tone="health?.ok ? 'ok' : 'danger'" dot /></div>
           <ul class="status-list">
-            <li><span>主模型</span><strong>{{ health?.providers.main_model || '未配置' }}</strong></li>
-            <li><span>网页搜索</span><strong>{{ health?.providers.web_search ? (health.providers.search_provider ?? '已启用') : '未启用' }}</strong></li>
-            <li><span>语音识别</span><strong>{{ health?.providers.asr_configured ? (health.providers.asr_provider ?? '已配置') : '未配置' }}</strong></li>
+            <li><span>网页搜索</span><strong>{{ health?.providers.web_search ? '已启用' : '未启用' }}</strong></li>
+            <li><span>语音识别</span><strong>{{ health?.providers.asr_configured ? '已配置' : '未配置' }}</strong></li>
             <li><span>今日 Token</span><strong class="hmi-mono">{{ (stats?.usage.today.tokens_in ?? 0) + (stats?.usage.today.tokens_out ?? 0) }}</strong></li>
           </ul>
         </section>

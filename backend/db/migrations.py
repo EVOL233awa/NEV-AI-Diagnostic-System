@@ -16,7 +16,8 @@ _PLANNED: dict[str, list[tuple[str, str]]] = {
         ("summarized_until_id", "INTEGER"),  # 已压缩消息边界
     ],
     "users": [
-        ("privacy_share_admin", "BOOLEAN NOT NULL DEFAULT 0"),  # 管理员查看原文授权（默认关）
+        ("privacy_share_admin", "BOOLEAN NOT NULL DEFAULT 0"),  # 历史兼容列（已并入 dialog）
+        ("theme", "VARCHAR(16) NOT NULL DEFAULT 'system'"),  # 界面主题偏好
     ],
     "vehicle_profiles": [
         ("mileage", "INTEGER"),  # 里程 km（可选）
@@ -49,6 +50,7 @@ CREATE TABLE users_new (
     display_name VARCHAR(64) NOT NULL,
     privacy_share_dialog BOOLEAN NOT NULL,
     privacy_share_admin BOOLEAN NOT NULL DEFAULT 0,
+    theme VARCHAR(16) NOT NULL DEFAULT 'system',
     disabled BOOLEAN NOT NULL,
     created_at DATETIME NOT NULL,
     last_login_at DATETIME
@@ -81,9 +83,9 @@ def ensure_columns(db: Session) -> None:
             db.execute(
                 text(
                     "INSERT INTO users_new (id, tenant_id, username, phone, password_hash, role,"
-                    " display_name, privacy_share_dialog, privacy_share_admin, disabled, created_at, last_login_at)"
+                    " display_name, privacy_share_dialog, privacy_share_admin, theme, disabled, created_at, last_login_at)"
                     " SELECT id, tenant_id, username, phone, password_hash, role, display_name,"
-                    " privacy_share_dialog, privacy_share_admin, disabled, created_at, last_login_at FROM users"
+                    " privacy_share_dialog, privacy_share_admin, theme, disabled, created_at, last_login_at FROM users"
                 )
             )
             db.execute(text("DROP TABLE users"))

@@ -58,6 +58,7 @@ export interface AuthUser {
   display_name: string
   privacy_share_dialog: boolean
   privacy_share_admin: boolean
+  theme: 'system' | 'dark' | 'light'
 }
 
 export interface LoginResp {
@@ -452,6 +453,10 @@ export async function updatePrivacy(
   patch: { privacy_share_dialog?: boolean; privacy_share_admin?: boolean },
 ): Promise<void> {
   await http.patch('/api/auth/privacy', patch)
+}
+
+export async function updatePreferences(theme: 'system' | 'dark' | 'light'): Promise<void> {
+  await http.patch('/api/auth/preferences', { theme })
 }
 
 export interface CaseInfo {

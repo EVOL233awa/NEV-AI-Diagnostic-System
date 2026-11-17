@@ -676,7 +676,6 @@ onMounted(async () => {
         :stages="stageSteps"
         :tools="contextTools"
         :privacy-dialog="auth.user?.privacy_share_dialog ?? false"
-        :privacy-admin="auth.user?.privacy_share_admin ?? false"
       />
     </aside>
 
@@ -706,7 +705,6 @@ onMounted(async () => {
         :stages="stageSteps"
         :tools="contextTools"
         :privacy-dialog="auth.user?.privacy_share_dialog ?? false"
-        :privacy-admin="auth.user?.privacy_share_admin ?? false"
       />
     </Sheet>
 

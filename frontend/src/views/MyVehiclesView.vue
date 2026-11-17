@@ -5,7 +5,6 @@ import {
   DIAG_STAGE_LABEL,
   addVehicle,
   deleteVehicle,
-  fetchVehicleHistory,
   fmtIso,
   listMyVehicles,
   oneLine,
@@ -13,6 +12,7 @@ import {
   type DiagBrief,
   type VehicleInfo,
 } from '../api/client'
+import { listMessages, type DiagResult } from '../api/chat'
 import EmptyState from '../components/EmptyState.vue'
 import PageHeader from '../components/layout/PageHeader.vue'
 import SeverityBadge from '../components/SeverityBadge.vue'
@@ -24,13 +24,10 @@ const manageVisible = ref(false)
 /** 历史诊断折叠状态：默认全部收起，点击展开 */
 const expanded = reactive<Record<number, boolean>>({})
 
-const historyVisible = ref(false)
-const historyVehicle = ref<VehicleInfo | null>(null)
-const historyItems = ref<DiagBrief[]>([])
-const historyTotal = ref(0)
-const historyOffset = ref(0)
-const historyLoading = ref(false)
-const HISTORY_PAGE = 20
+const detailVisible = ref(false)
+const detailLoading = ref(false)
+const detailItem = ref<DiagBrief | null>(null)
+const detailDiag = ref<DiagResult | null>(null)
 
 const mileageVisible = ref(false)
 const mileageVehicle = ref<VehicleInfo | null>(null)
@@ -65,30 +62,20 @@ function toggleHistory(id: number): void {
   expanded[id] = !expanded[id]
 }
 
-async function openHistory(v: VehicleInfo): Promise<void> {
-  historyVehicle.value = v
-  historyVisible.value = true
-  await loadHistory(0)
-}
-
-async function loadHistory(offset: number): Promise<void> {
-  const vehicle = historyVehicle.value
-  if (!vehicle) return
-  historyLoading.value = true
+async function openDetail(item: DiagBrief): Promise<void> {
+  detailItem.value = item
+  detailDiag.value = null
+  detailVisible.value = true
+  detailLoading.value = true
   try {
-    const body = await fetchVehicleHistory(vehicle.id, HISTORY_PAGE, offset)
-    historyItems.value = body.items
-    historyTotal.value = body.total
-    historyOffset.value = offset
+    const { messages } = await listMessages(item.session_id)
+    const withDiag = messages.filter((m) => m.diag)
+    detailDiag.value = withDiag.length ? withDiag[withDiag.length - 1].diag : null
   } catch (e) {
     ElMessage.error(extractError(e))
   } finally {
-    historyLoading.value = false
+    detailLoading.value = false
   }
-}
-
-function onHistoryPage(page: number): void {
-  void loadHistory((page - 1) * HISTORY_PAGE)
 }
 
 function openMileage(v: VehicleInfo): void {
@@ -169,7 +156,7 @@ onMounted(refresh)
 
 <template>
   <div class="page">
-    <PageHeader title="我的车辆" subtitle="档案、里程与完整诊断历史；历史只展示诊断摘要，不含对话原文">
+    <PageHeader title="我的车辆" subtitle="档案、里程与诊断历史；点击历史条目查看该次诊断详情">
       <template #actions>
         <el-button type="primary" @click="manageVisible = true">管理车辆</el-button>
       </template>
@@ -218,7 +205,6 @@ onMounted(refresh)
         <section class="latest">
           <div class="latest-head">
             <h3>最近诊断</h3>
-            <el-button v-if="v.history?.length" text size="small" @click="openHistory(v)">完整历史 →</el-button>
           </div>
           <template v-if="v.history?.length">
             <div class="latest-main">
@@ -232,7 +218,13 @@ onMounted(refresh)
               历史记录（{{ v.history.length }}）<span class="chev" aria-hidden="true">{{ expanded[v.id] ? '▾' : '▸' }}</span>
             </button>
             <div v-show="expanded[v.id]" class="history-list">
-              <div v-for="(h, i) in v.history" :key="i" class="history-row">
+              <button
+                v-for="(h, i) in v.history"
+                :key="i"
+                type="button"
+                class="history-row"
+                @click="openDetail(h)"
+              >
                 <div class="history-top">
                   <div class="history-tags">
                     <SeverityBadge :severity="h.severity" />
@@ -240,9 +232,10 @@ onMounted(refresh)
                     <StatusChip v-if="h.has_case" label="已沉淀案例" tone="info" />
                   </div>
                   <span class="time hmi-mono">{{ fmtIso(h.created_at) }}</span>
+                  <span class="row-chev" aria-hidden="true">›</span>
                 </div>
                 <p class="history-text">{{ oneLine(h.summary) }}</p>
-              </div>
+              </button>
             </div>
           </template>
           <p v-else class="muted">暂无历史诊断</p>
@@ -308,35 +301,39 @@ onMounted(refresh)
       </template>
     </el-dialog>
 
-    <el-dialog v-model="historyVisible" title="完整诊断历史" width="min(94vw, 640px)">
-      <p class="history-vehicle">
-        {{ historyVehicle ? [historyVehicle.brand, historyVehicle.model_name, historyVehicle.plate_no].filter(Boolean).join(' ') : '' }}
-        <span class="muted">共 {{ historyTotal }} 次</span>
-      </p>
-      <div v-loading="historyLoading" class="full-history">
-        <EmptyState v-if="!historyLoading && historyItems.length === 0" title="暂无历史诊断" compact />
-        <div v-for="(h, i) in historyItems" :key="i" class="history-row">
-          <div class="history-top">
+    <el-dialog v-model="detailVisible" title="诊断详情" width="min(94vw, 640px)">
+      <div v-loading="detailLoading" class="diag-detail">
+        <template v-if="detailItem">
+          <div class="detail-head">
             <div class="history-tags">
-              <SeverityBadge :severity="h.severity" />
-              <StatusChip v-if="h.stage" :label="DIAG_STAGE_LABEL[h.stage]" tone="neutral" />
-              <StatusChip v-if="h.has_case" label="已沉淀案例" tone="info" />
+              <SeverityBadge :severity="detailItem.severity" />
+              <StatusChip v-if="detailItem.stage" :label="DIAG_STAGE_LABEL[detailItem.stage]" tone="neutral" />
+              <StatusChip v-if="detailItem.has_case" label="已沉淀案例" tone="info" />
             </div>
-            <span class="time hmi-mono">{{ fmtIso(h.created_at) }}</span>
+            <span class="time hmi-mono">{{ fmtIso(detailItem.created_at) }}</span>
           </div>
-          <p class="history-session">{{ h.session_title }}</p>
-          <p class="history-text">{{ oneLine(h.summary) }}</p>
-        </div>
+          <p class="history-session">{{ detailItem.session_title }}</p>
+          <div v-if="detailDiag" class="diag-card" :data-severity="detailDiag.severity">
+            <p class="diag-summary">{{ detailDiag.summary }}</p>
+            <div v-if="detailDiag.hypotheses?.length" class="diag-sec">
+              <p class="sec-title">可能原因</p>
+              <ul><li v-for="(h, hi) in detailDiag.hypotheses" :key="hi">{{ h.title }}</li></ul>
+            </div>
+            <div v-if="detailDiag.steps?.length" class="diag-sec">
+              <p class="sec-title">建议检修步骤</p>
+              <ol><li v-for="s in detailDiag.steps" :key="s">{{ s }}</li></ol>
+            </div>
+            <div v-if="detailDiag.pending_checks?.length" class="diag-sec">
+              <p class="sec-title">仍需到店确认</p>
+              <ul><li v-for="c in detailDiag.pending_checks" :key="c">{{ c }}</li></ul>
+            </div>
+          </div>
+          <div v-else-if="!detailLoading" class="diag-fallback">
+            <p class="history-text">{{ detailItem.summary }}</p>
+            <p class="muted small">该次诊断未保存结构化结论。</p>
+          </div>
+        </template>
       </div>
-      <el-pagination
-        v-if="historyTotal > HISTORY_PAGE"
-        class="history-pager"
-        layout="prev, pager, next"
-        :page-size="HISTORY_PAGE"
-        :total="historyTotal"
-        :current-page="historyOffset / HISTORY_PAGE + 1"
-        @current-change="onHistoryPage"
-      />
     </el-dialog>
   </div>
 </template>
@@ -486,9 +483,28 @@ onMounted(refresh)
 }
 
 .history-row {
+  display: block;
+  inline-size: 100%;
   padding: 0.45rem 0.55rem;
   border: 1px solid var(--hmi-line-soft);
   border-radius: var(--hmi-radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.history-row:hover,
+.history-row:focus-visible {
+  border-color: var(--hmi-accent-line);
+  background: var(--hmi-surface-2);
+}
+
+.row-chev {
+  color: var(--hmi-text-3);
+  font-size: 0.9rem;
+  line-height: 1;
 }
 
 .history-top {
@@ -590,18 +606,65 @@ onMounted(refresh)
   align-items: baseline;
 }
 
-.full-history {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+.diag-detail {
   min-block-size: 80px;
-  max-block-size: 55vh;
-  overflow-y: auto;
 }
 
-.history-pager {
+.detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.diag-card {
   margin-block-start: 0.7rem;
-  justify-content: center;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--hmi-line);
+  border-inline-start: 3px solid var(--hmi-warn);
+  border-radius: var(--hmi-radius);
+  background: var(--hmi-surface-2);
+}
+
+.diag-card[data-severity='red'] {
+  border-inline-start-color: var(--hmi-danger);
+}
+
+.diag-card[data-severity='green'] {
+  border-inline-start-color: var(--hmi-ok);
+}
+
+.diag-summary {
+  font-size: var(--hmi-fs-3);
+  line-height: 1.7;
+  color: var(--hmi-text);
+}
+
+.diag-sec {
+  margin-block-start: 0.65rem;
+}
+
+.sec-title {
+  margin-block-end: 0.2rem;
+  color: var(--hmi-text-3);
+  font-size: var(--hmi-fs-1);
+  letter-spacing: 0.04em;
+}
+
+.diag-sec ul,
+.diag-sec ol {
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: var(--hmi-fs-2);
+  line-height: 1.6;
+  color: var(--hmi-text-2);
+}
+
+.diag-fallback {
+  margin-block-start: 0.6rem;
 }
 
 @media (max-width: 560px) {
