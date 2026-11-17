@@ -12,8 +12,8 @@
                   联网检索供应商（deepseek 官方默认，tavily/custom 可切换）
   asr           = { provider, max_seconds, max_bytes, deepseek{...}, openai{...} }
                   语音转文字供应商（deepseek 官方默认，openai 兼容接口可切换）
-  quota         = { asr_daily_seconds_per_user, search_daily_calls_per_user, global_daily_usd }
-                  三值 null/缺失/空串/0 = 不限制；正数 = 当日上限
+  quota         = { asr_daily_seconds_per_user, search_daily_calls_per_user, global_daily_cny }
+                  三值 null/缺失/空串/0 = 不限制；正数 = 当日上限（预算单位人民币元）
   cors_origins  = [ ... ]           可选，缺省用 DEFAULT_CORS_ORIGINS
   security      = { jwt_secret }    首次启动自动生成并写回
   seed_admin    = { username, password } 首次初始化账号时写入（密码仅落此文件）
@@ -39,6 +39,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+from backend.core import pricing
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -154,7 +156,7 @@ DEFAULT_ASR: dict[str, Any] = {
 DEFAULT_QUOTA: dict[str, Any] = {
     "asr_daily_seconds_per_user": None,
     "search_daily_calls_per_user": None,
-    "global_daily_usd": None,
+    "global_daily_cny": None,
 }
 
 
@@ -171,8 +173,26 @@ def _deep_merge(defaults: dict[str, Any], value: Any) -> dict[str, Any]:
     return result
 
 
+def _migrate_quota_currency(raw: dict[str, Any]) -> str | None:
+    """v2.1 开发期字段 global_daily_usd → global_daily_cny（旧值按固定估算汇率换算）。"""
+    quota = raw.get("quota")
+    if not isinstance(quota, dict) or "global_daily_usd" not in quota:
+        return None
+    legacy = quota.pop("global_daily_usd")
+    if "global_daily_cny" not in quota:
+        if legacy is None or isinstance(legacy, bool) or (isinstance(legacy, str) and not legacy.strip()):
+            quota["global_daily_cny"] = None
+        else:
+            try:
+                quota["global_daily_cny"] = round(float(legacy) * pricing.USD_TO_CNY, 2)
+            except (TypeError, ValueError):
+                quota["global_daily_cny"] = None
+    return f"quota.global_daily_usd 已换算为 global_daily_cny（×{pricing.USD_TO_CNY}）"
+
+
 def _apply_defaults(raw: dict[str, Any]) -> None:
     """补齐 search/asr/quota/deepseek.aux_key 等结构默认值（不改已有值）。"""
+    _migrate_quota_currency(raw)
     ds = raw.setdefault("deepseek", {})
     if not isinstance(ds, dict):
         ds = {}
@@ -224,13 +244,23 @@ def _migrate_config(raw: dict[str, Any]) -> None:
         version = int(meta.get("schema_version") or 0) if isinstance(meta, dict) else 0
     except (TypeError, ValueError):
         version = 0
+
+    warnings: list[str] = []
+    currency_warning = _migrate_quota_currency(raw)
+    if currency_warning:
+        warnings.append(currency_warning)
     if version >= SCHEMA_VERSION:
+        # 结构已是 v2：只处理 v2.1 开发期出现的预算币种字段改名
+        if currency_warning:
+            if CONFIG_PATH.exists():
+                shutil.copy2(CONFIG_PATH, _config_backup_path())
+            save_raw(raw)
+            _append_migration_log(warnings)
         return
 
     if CONFIG_PATH.exists():
         shutil.copy2(CONFIG_PATH, _config_backup_path())
 
-    warnings: list[str] = []
     had_search = isinstance(raw.get("search"), dict)
     had_asr = isinstance(raw.get("asr"), dict)
 

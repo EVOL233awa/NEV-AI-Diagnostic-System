@@ -69,7 +69,7 @@ def test_migrates_legacy_keys(legacy_setup: Path):
     assert raw["quota"] == {
         "asr_daily_seconds_per_user": None,
         "search_daily_calls_per_user": None,
-        "global_daily_usd": None,
+        "global_daily_cny": None,
     }
     # 小模型参数迁入 agent
     assert raw["agent"]["title_temperature"] == 0.5
@@ -124,3 +124,37 @@ def test_is_official_deepseek():
     assert not config_mod.is_official_deepseek("https://api.other-vendor.com")
     assert not config_mod.is_official_deepseek("https://api.deepseek.com.evil.example")
     assert not config_mod.is_official_deepseek("")
+
+
+def test_migrates_dev_usd_budget_to_cny(tmp_path, monkeypatch):
+    """v2.1 开发期曾用 global_daily_usd：改名为 global_daily_cny 并按估算汇率换算。"""
+    path = tmp_path / "config.json"
+    _write(path, {
+        "_meta": {"schema_version": 2},
+        "quota": {
+            "asr_daily_seconds_per_user": 300,
+            "search_daily_calls_per_user": 50,
+            "global_daily_usd": 2.0,
+        },
+    })
+    monkeypatch.setattr(config_mod, "CONFIG_PATH", path)
+    monkeypatch.setattr(config_mod, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "LOG_DIR", tmp_path / "logs")
+
+    raw = config_mod.load_raw()
+    config_mod._migrate_config(raw)
+    assert raw["quota"] == {
+        "asr_daily_seconds_per_user": 300,
+        "search_daily_calls_per_user": 50,
+        "global_daily_cny": 14.4,
+    }
+    on_disk = json.loads(path.read_text(encoding="utf-8"))
+    assert on_disk["quota"]["global_daily_cny"] == 14.4
+    assert "global_daily_usd" not in on_disk["quota"]
+    assert len(list(tmp_path.glob("config.json.bak-*"))) == 1
+    log = (tmp_path / "logs" / "migration.log").read_text(encoding="utf-8")
+    assert "global_daily_cny" in log
+
+    # 再次启动不再备份/改写
+    config_mod._migrate_config(json.loads(path.read_text(encoding="utf-8")))
+    assert len(list(tmp_path.glob("config.json.bak-*"))) == 1

@@ -172,7 +172,7 @@ class TestUsageAndQuota:
         monkeypatch.setattr(quota_mod, "settings", SimpleNamespace(quota={
             "asr_daily_seconds_per_user": 60,
             "search_daily_calls_per_user": None,
-            "global_daily_usd": None,
+            "global_daily_cny": None,
         }))
         r = _post(client, owner_headers)
         assert r.status_code == 429 and "额度已用完" in r.json()["detail"]
@@ -188,7 +188,7 @@ class TestUsageAndQuota:
         monkeypatch.setattr(quota_mod, "settings", SimpleNamespace(quota={
             "asr_daily_seconds_per_user": None,
             "search_daily_calls_per_user": None,
-            "global_daily_usd": 1.0,
+            "global_daily_cny": 1.0,
         }))
         r = _post(client, owner_headers)
         assert r.status_code == 503 and "预算已用完" in r.json()["detail"]

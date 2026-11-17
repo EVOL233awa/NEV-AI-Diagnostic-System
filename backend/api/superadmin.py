@@ -39,7 +39,7 @@ router = APIRouter(prefix="/api/superadmin", tags=["superadmin"])
 # PUT 里 api_key 传空串视同「不修改」：真要吊销 key 可显式传 "__clear__"
 CLEAR_KEY = "__clear__"
 
-QUOTA_FIELDS = ("asr_daily_seconds_per_user", "search_daily_calls_per_user", "global_daily_usd")
+QUOTA_FIELDS = ("asr_daily_seconds_per_user", "search_daily_calls_per_user", "global_daily_cny")
 
 
 def _mask(value: str) -> str:
@@ -125,7 +125,7 @@ class QuotaIn(BaseModel):
 
     asr_daily_seconds_per_user: float | None = None
     search_daily_calls_per_user: float | None = None
-    global_daily_usd: float | None = None
+    global_daily_cny: float | None = None
 
 
 class ProvidersIn(BaseModel):

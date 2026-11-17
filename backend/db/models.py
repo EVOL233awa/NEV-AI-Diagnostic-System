@@ -264,7 +264,7 @@ class UsageStat(Base):
     model: Mapped[str] = mapped_column(String(128), default="")
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
-    # 统一 USD（估算）；主模型 token 成本无法可靠估算时为 None，仅搜索/ASR 有值
+    # 统一 CNY（估算，元）；主模型 token 成本无法可靠估算时为 None，仅搜索/ASR 有值
     cost_estimate: Mapped[float | None] = mapped_column(Float, default=None, nullable=True)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)  # ASR 音频时长（毫秒）

@@ -87,7 +87,7 @@ const recentAppointments = computed(() => appointments.value.slice(0, 5))
 const quotaState = computed(() => {
   if (!superConfig.value) return '加载中'
   const quota = superConfig.value.quota
-  const enabled = [quota.asr_daily_seconds_per_user, quota.search_daily_calls_per_user, quota.global_daily_usd]
+  const enabled = [quota.asr_daily_seconds_per_user, quota.search_daily_calls_per_user, quota.global_daily_cny]
     .some((value) => typeof value === 'number' && value > 0)
   return enabled ? '已启用限额' : '未启用限额'
 })

@@ -394,7 +394,7 @@ export interface AdminStats {
   cases: number
   users: number
   consumption?: ConsumptionStats
-  usage_daily?: { date: string; calls: number; tokens_in: number; tokens_out: number; cost_usd: number }[]
+  usage_daily?: { date: string; calls: number; tokens_in: number; tokens_out: number; cost_cny: number }[]
   appointments_daily?: { date: string; count: number }[]
   severity?: { red: number; yellow: number; green: number; unknown: number }
   stage_funnel?: { stage: string; count: number }[]
@@ -404,18 +404,18 @@ export interface AdminStats {
 export interface ConsumptionStats {
   asr_seconds_today: number
   search_calls_today: number
-  cost_today_usd: number
+  cost_today_cny: number
   top_users: {
     user_id: number | null
     username: string
     asr_seconds: number
     search_calls: number
-    cost_usd: number
+    cost_cny: number
   }[]
   limits: {
     asr_daily_seconds_per_user: number | null
     search_daily_calls_per_user: number | null
-    global_daily_usd: number | null
+    global_daily_cny: number | null
   }
 }
 
@@ -584,7 +584,7 @@ export interface AsrConfigView {
 export interface QuotaView {
   asr_daily_seconds_per_user: number | null
   search_daily_calls_per_user: number | null
-  global_daily_usd: number | null
+  global_daily_cny: number | null
 }
 
 export type PasswordSource = 'env' | 'config' | 'generated'

@@ -72,7 +72,7 @@ flowchart TB
 - **上下文压缩与三层记忆**：超过 20 轮或 token 预算时压缩早期内容；会话诊断状态卡、跨会话车辆档案、店员沉淀案例三层记忆；案例沉淀必须关联已完成工单且车主授权对话可见。
 - **预约闭环**：诊断卡一键预约 → 店员接单/改约 → 回填维修结果 → 沉淀案例 → HTML 打印报告（另存 PDF）；状态机约束 + 30s 新单轮询提醒。
 - **隐私边界**：诊断摘要卡始终对店员可见；对话原文只在车主开启“店员可见对话”后随工单可见（后端 403 强制）；管理员原文另由 `privacy_share_admin` 独立开关控制，未授权时 API 层脱敏并写审计。
-- **用量与限额**：搜索/ASR 每次调用写 `usage_stats`（次数、时长、成本估算）；superadmin 可配置每用户每日搜索次数、ASR 秒数、全局美元预算，默认三项 `null` 不限制；限额拒绝也写审计。
+- **用量与限额**：搜索/ASR 每次调用写 `usage_stats`（次数、时长、成本估算，人民币计价）；superadmin 可配置每用户每日搜索次数、ASR 秒数、全局每日预算（元），默认三项 `null` 不限制；限额拒绝也写审计。
 - **C HMI 设计系统**：17 条路由统一 AppShell / 侧栏 / 顶栏 / 移动底栏，五档宽度（360/390/768/1024/1440）无横向溢出；深色座舱风、打印浅色主题、键盘焦点与 44px 触控目标。
 - **安全与审计**：JWT 四角色接口级鉴权、PBKDF2 密码哈希、登录限速、CSP/安全响应头、上传体积上限、config 原子写；登录、建号、改角色、预约流转、隐私变更、案例沉淀、管理员查看原文、ASR/搜索限额拒绝等写审计。
 
@@ -179,7 +179,7 @@ python -m backend.seed.load_corpus
   "quota": {
     "asr_daily_seconds_per_user": null,
     "search_daily_calls_per_user": null,
-    "global_daily_usd": null
+    "global_daily_cny": null
   },
   "cors_origins": ["https://nev.evoidngc.top", "http://127.0.0.1:8600"],
   "security": { "jwt_secret": "<首次启动自动生成；也可手工填>" },
@@ -210,7 +210,7 @@ python -m backend.seed.load_corpus
 - **模型供应商**：主模型（含 `aux_key`）、嵌入、重排三个槽位的 API 地址、模型、Key（Key 单向掩码，留空即不修改），重排开关与分数阈值；每个槽位有「测试连接」。
 - **联网检索**：DeepSeek / Tavily / 自定义供应商切换、降级开关、结果数与正文长度、各供应商地址/Key/超时；带搜索实测。
 - **语音识别**：DeepSeek / OpenAI 兼容供应商切换、`max_seconds`、`max_bytes`、地址/模型/Key/超时。
-- **限额**：每用户每日 ASR 秒数、搜索次数、全局美元预算；空/0 = 不限制。
+- **限额**：每用户每日 ASR 秒数、搜索次数、全局每日预算（元）；空/0 = 不限制。
 - **Agent 运行参数**：单轮工具轮数、追问上限、回复 token、温度、工具结果截断、压缩双阀门、首轮强制检索。
 - **前端接入地址**（仅当前浏览器 localStorage）：留空 = 同源；跨源调试时填写，带测试连接。
 
@@ -248,7 +248,7 @@ python -m backend.seed.load_corpus  # 重新导入内置知识库（自动去重
 ## 测试
 
 ```bash
-python -m pytest tests/    # 221 例，全离线临时库，不触碰真实 data/
+python -m pytest tests/    # 222 例，全离线临时库，不触碰真实 data/
 cd frontend && npm run typecheck && npm run build
 cd frontend && npm run test   # Vitest 11 例（WAV 编码 / 录音状态机）
 ```
@@ -276,7 +276,7 @@ backend/
     pricing.py           成本估算
   seed/                  演示账号 + 演示车辆 + 内置知识库（corpus/）
 frontend/                Vue 3 + TypeScript + Vite + Element Plus（17 路由）
-tests/                   pytest 回归套件（221 例）
+tests/                   pytest 回归套件（222 例）
 data/                    运行时生成：config.json / data.db / logs/（不入库）
 ```
 

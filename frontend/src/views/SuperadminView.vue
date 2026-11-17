@@ -178,8 +178,8 @@ function fillForm(data: SuperadminConfig): void {
     ? '' : String(data.quota.asr_daily_seconds_per_user)
   quotaInputs.search = data.quota.search_daily_calls_per_user == null
     ? '' : String(data.quota.search_daily_calls_per_user)
-  quotaInputs.budget = data.quota.global_daily_usd == null
-    ? '' : String(data.quota.global_daily_usd)
+  quotaInputs.budget = data.quota.global_daily_cny == null
+    ? '' : String(data.quota.global_daily_cny)
 
   Object.assign(agent, data.agent)
 }
@@ -284,7 +284,7 @@ async function save(): Promise<void> {
       quota: {
         asr_daily_seconds_per_user: asrQuota,
         search_daily_calls_per_user: searchQuota,
-        global_daily_usd: budgetQuota,
+        global_daily_cny: budgetQuota,
       },
       agent: { ...agent },
     })
@@ -667,7 +667,7 @@ function testText(result: SlotTestResult | null): string {
           <el-form-item label="每人每日搜索次数">
             <el-input v-model="quotaInputs.search" placeholder="留空 = 不限制" class="w220" />
           </el-form-item>
-          <el-form-item label="全局每日预算（USD）">
+          <el-form-item label="全局每日预算（元）">
             <el-input v-model="quotaInputs.budget" placeholder="留空 = 不限制" class="w220" />
           </el-form-item>
         </el-form>

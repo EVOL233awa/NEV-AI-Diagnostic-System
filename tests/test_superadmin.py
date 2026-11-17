@@ -283,7 +283,7 @@ class TestConfigApi:
             "/api/superadmin/config",
             headers=superadmin_headers,
             json={"quota": {k: None for k in
-                            ("asr_daily_seconds_per_user", "search_daily_calls_per_user", "global_daily_usd")}},
+                            ("asr_daily_seconds_per_user", "search_daily_calls_per_user", "global_daily_cny")}},
         )
         assert r.status_code == 200
         cfg = client.get("/api/superadmin/config", headers=superadmin_headers).json()
@@ -292,12 +292,12 @@ class TestConfigApi:
         r = client.put("/api/superadmin/config", headers=superadmin_headers,
                        json={"quota": {"asr_daily_seconds_per_user": 300,
                                        "search_daily_calls_per_user": 50,
-                                       "global_daily_usd": 2.0}})
+                                       "global_daily_cny": 2.0}})
         assert r.status_code == 200
         assert config_mod.settings.quota == {
             "asr_daily_seconds_per_user": 300.0,
             "search_daily_calls_per_user": 50.0,
-            "global_daily_usd": 2.0,
+            "global_daily_cny": 2.0,
         }
         # 0 = 不限制
         r = client.put("/api/superadmin/config", headers=superadmin_headers,
@@ -306,7 +306,7 @@ class TestConfigApi:
         assert config_mod.settings.quota["asr_daily_seconds_per_user"] is None
         # 负数拒绝
         r = client.put("/api/superadmin/config", headers=superadmin_headers,
-                       json={"quota": {"global_daily_usd": -1}})
+                       json={"quota": {"global_daily_cny": -1}})
         assert r.status_code == 400
 
     def test_put_empty_body_rejected(self, client, superadmin_headers):

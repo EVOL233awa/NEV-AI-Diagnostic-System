@@ -61,7 +61,7 @@ const limits = computed(() => stats.value?.consumption?.limits ?? null)
 const limitsEnabled = computed(() => {
   const value = limits.value
   if (!value) return false
-  return [value.asr_daily_seconds_per_user, value.search_daily_calls_per_user, value.global_daily_usd]
+  return [value.asr_daily_seconds_per_user, value.search_daily_calls_per_user, value.global_daily_cny]
     .some((item) => typeof item === 'number' && item > 0)
 })
 
@@ -81,9 +81,9 @@ const maxSearchUse = computed(() => {
 
 const costUse = computed(() => {
   const value = stats.value?.consumption
-  const limit = limits.value?.global_daily_usd
+  const limit = limits.value?.global_daily_cny
   if (!value || !limit) return 0
-  return value.cost_today_usd / limit
+  return value.cost_today_cny / limit
 })
 
 const todayTokens = computed(() => (stats.value?.usage.today.tokens_in ?? 0) + (stats.value?.usage.today.tokens_out ?? 0))
@@ -132,7 +132,7 @@ onMounted(async () => {
       <div class="hmi-grid hmi-grid--stats">
         <StatCard label="今日模型调用" :value="stats.usage.today.calls" tone="accent" :hint="`近 7 天 ${stats.usage.week.calls} 次`" />
         <StatCard label="今日 Token" :value="todayTokens.toLocaleString()" tone="info" :hint="`入 ${stats.usage.today.tokens_in.toLocaleString()} / 出 ${stats.usage.today.tokens_out.toLocaleString()}`" />
-        <StatCard label="今日成本估算" :value="`$${stats.usage.today.cost.toFixed(4)}`" tone="warn" hint="按 provider 单价估算" />
+        <StatCard label="今日成本估算" :value="`¥${stats.usage.today.cost.toFixed(4)}`" tone="warn" hint="按 provider 单价估算（人民币）" />
         <StatCard label="沉淀案例" :value="stats.cases" tone="ok" :hint="`${stats.users} 个在职账号`" />
       </div>
 
@@ -197,7 +197,7 @@ onMounted(async () => {
           <div class="consume-stats">
             <div><span>今日 ASR</span><strong class="hmi-mono">{{ stats.consumption?.asr_seconds_today ?? 0 }} 秒</strong></div>
             <div><span>今日搜索</span><strong class="hmi-mono">{{ stats.consumption?.search_calls_today ?? 0 }} 次</strong></div>
-            <div><span>今日成本</span><strong class="hmi-mono">${{ (stats.consumption?.cost_today_usd ?? 0).toFixed(4) }}</strong></div>
+            <div><span>今日成本</span><strong class="hmi-mono">¥{{ (stats.consumption?.cost_today_cny ?? 0).toFixed(4) }}</strong></div>
           </div>
 
           <div v-if="limitsEnabled" class="gauges">
@@ -213,7 +213,7 @@ onMounted(async () => {
             <h4>今日消耗 Top 5</h4>
             <div v-for="user in stats.consumption.top_users" :key="`${user.user_id}`" class="user-row">
               <span>{{ user.username || '未命名用户' }}</span>
-              <span class="hmi-mono">{{ user.asr_seconds }}s · {{ user.search_calls }} 次 · ${{ user.cost_usd.toFixed(4) }}</span>
+              <span class="hmi-mono">{{ user.asr_seconds }}s · {{ user.search_calls }} 次 · ¥{{ user.cost_cny.toFixed(4) }}</span>
             </div>
           </div>
         </div>

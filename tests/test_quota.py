@@ -19,7 +19,7 @@ def _settings(**quota) -> SimpleNamespace:
     defaults = {
         "asr_daily_seconds_per_user": None,
         "search_daily_calls_per_user": None,
-        "global_daily_usd": None,
+        "global_daily_cny": None,
     }
     defaults.update(quota)
     return SimpleNamespace(quota=defaults)
@@ -78,7 +78,7 @@ def test_global_budget_blocks_both(db_session, monkeypatch):
     db_session.add(UsageStat(tenant_id=1, user_id=USER + 4, slot="asr",
                              duration_ms=1000, cost_estimate=0.9))
     db_session.commit()
-    monkeypatch.setattr(quota_mod, "settings", _settings(global_daily_usd=2.0))
+    monkeypatch.setattr(quota_mod, "settings", _settings(global_daily_cny=2.0))
     assert quota_mod.check_asr(db_session, USER + 5) == "global"
     assert quota_mod.check_search(db_session, USER + 5) == "global"
 
@@ -97,7 +97,8 @@ def test_record_asr_and_search(db_session, monkeypatch):
            .filter_by(user_id=USER + 6, slot="asr")
            .order_by(UsageStat.id.desc()).first())
     assert row is not None and row.duration_ms == 60_000
-    assert row.cost_estimate == pytest.approx(60_000 / 3_600_000 * 0.116, rel=1e-3)
+    # 60s × $0.116/音频小时 × 7.2 估算汇率 ≈ ¥0.01392
+    assert row.cost_estimate == pytest.approx(60_000 / 3_600_000 * 0.116 * 7.2, rel=1e-3)
 
     quota_mod.record_search(db_session, tenant_id=1, user_id=USER + 6, provider="tavily",
                             success=True, latency_ms=300)
@@ -106,7 +107,7 @@ def test_record_asr_and_search(db_session, monkeypatch):
     rows = (db_session.query(UsageStat)
             .filter_by(user_id=USER + 6, slot="search")
             .order_by(UsageStat.id).all())
-    assert [r.cost_estimate for r in rows] == [0.00075, 0.0]
+    assert [r.cost_estimate for r in rows] == [0.0054, 0.0]
     # 用户搜索限额按发起次数计：失败/零结果同样占一次
     monkeypatch.setattr(quota_mod, "settings", _settings(search_daily_calls_per_user=2))
     assert quota_mod.check_search(db_session, USER + 6) == "user"

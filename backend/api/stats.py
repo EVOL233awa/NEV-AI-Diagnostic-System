@@ -45,20 +45,20 @@ def _today_consumption(db, tenant_id: int) -> dict:
             "username": names.get(uid, ""),
             "asr_seconds": round(float(ms or 0) / 1000.0, 1),
             "search_calls": int(calls or 0),
-            "cost_usd": round(float(cost or 0.0), 6),
+            "cost_cny": round(float(cost or 0.0), 6),
         }
         for uid, ms, calls, cost in rows
     ]
-    users.sort(key=lambda u: (u["cost_usd"], u["asr_seconds"], u["search_calls"]), reverse=True)
+    users.sort(key=lambda u: (u["cost_cny"], u["asr_seconds"], u["search_calls"]), reverse=True)
     return {
         "asr_seconds_today": round(sum(u["asr_seconds"] for u in users), 1),
         "search_calls_today": sum(u["search_calls"] for u in users),
-        "cost_today_usd": round(float(quota.global_cost_today(db)), 6),
+        "cost_today_cny": round(float(quota.global_cost_today(db)), 6),
         "top_users": users[:5],
         "limits": {
             "asr_daily_seconds_per_user": quota.normalize_limit(settings.quota.get("asr_daily_seconds_per_user")),
             "search_daily_calls_per_user": quota.normalize_limit(settings.quota.get("search_daily_calls_per_user")),
-            "global_daily_usd": quota.normalize_limit(settings.quota.get("global_daily_usd")),
+            "global_daily_cny": quota.normalize_limit(settings.quota.get("global_daily_cny")),
         },
     }
 
@@ -83,14 +83,14 @@ def _daily_usage(db, tenant_id: int, days: int = 14) -> list[dict]:
             "calls": int(calls),
             "tokens_in": int(tokens_in),
             "tokens_out": int(tokens_out),
-            "cost_usd": round(float(cost), 6),
+            "cost_cny": round(float(cost), 6),
         }
         for day, calls, tokens_in, tokens_out, cost in rows
     }
     series = []
     for offset in range(days):
         day = (start + timedelta(days=offset)).date().isoformat()
-        series.append({"date": day, **found.get(day, {"calls": 0, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0})})
+        series.append({"date": day, **found.get(day, {"calls": 0, "tokens_in": 0, "tokens_out": 0, "cost_cny": 0.0})})
     return series
 
 
