@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **语音输入**：浏览器 16 kHz 单声道 WAV 录音 → `/api/asr/transcribe` → 文本回填；支持 DeepSeek 官方 ASR 与 OpenAI 兼容接口；服务端校验时长与上传大小，不落盘、不记录识别文本；前端新增 VoiceButton、录音状态机与 WAV 编码测试。
 - **诊断阶段与证据链**：接诊→假设→验证→结论阶段时间线，E1/E2… 证据编号与假设↔证据映射落库；管理员诊断质控页支持阶段/严重度筛选、证据关联率、原文受控查看并写审计。
 - **DTC 故障码速查**：店员端精确码表查询 + 知识块兜底 + 厂商专有码提示。
-- **车辆档案增强**：里程编辑、完整诊断历史分页（仅摘要/阶段，不含原文）。
+- **车辆档案增强**：支持里程编辑与最近诊断历史查看。
 - **用量与限额**：搜索/ASR 写 `usage_stats`（次数/时长/成本，人民币计价），支持每用户每日搜索次数、ASR 秒数、全局每日预算（元）；默认三项 `null` 不限制；限额拒绝写审计。
 - **superadmin 调试后台扩展**：搜索/ASR 供应商、限额、主模型 `aux_key`、固定密码来源展示与在线修改；配置 GET 全量掩码，PUT 留空保持、`__clear__` 清除。
 - **C HMI 设计系统**：17 条路由统一 AppShell / SideNav / TopBar / MobileTabBar，五档宽度适配、打印浅色主题、`prefers-reduced-motion`、44px 触控目标、跳过链接与焦点轮廓。

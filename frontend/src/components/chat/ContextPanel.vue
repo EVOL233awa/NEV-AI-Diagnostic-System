@@ -34,7 +34,7 @@ const vehicleTitle = computed(() => {
           <div><dt>车牌</dt><dd>{{ vehicle.plate_no || '—' }}</dd></div>
           <div><dt>里程</dt><dd class="hmi-mono">{{ vehicle.mileage != null ? `${vehicle.mileage.toLocaleString()} km` : '—' }}</dd></div>
         </dl>
-        <RouterLink v-if="role === 'owner'" class="link" to="/my-vehicles">查看完整诊断历史 →</RouterLink>
+        <RouterLink v-if="role === 'owner'" class="link" to="/my-vehicles">查看车辆与诊断记录 →</RouterLink>
         <RouterLink v-else class="link" :to="`/staff/vehicles`">车辆档案检索 →</RouterLink>
       </template>
       <p v-else class="muted">本会话未关联车辆。车主添加默认车辆后，新会话会自动归档。</p>

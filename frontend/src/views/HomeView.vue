@@ -204,7 +204,7 @@ onMounted(load)
       <EmptyState
         v-else-if="!loading"
         title="还没有车辆档案"
-        description="添加车辆后可获得更贴合车型的诊断与完整历史。"
+        description="添加车辆后可获得更贴合车型的诊断与历史记录。"
         compact
       >
         <el-button type="primary" size="small" @click="go('/my-vehicles')">添加车辆</el-button>
