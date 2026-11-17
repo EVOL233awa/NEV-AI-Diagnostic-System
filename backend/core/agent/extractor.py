@@ -1,12 +1,9 @@
-"""标题/状态卡抽取的小模型客户端（异步，不阻塞主对话；失败静默降级）。
+"""标题/状态卡抽取（异步，不阻塞主对话；失败静默降级）。
 
-槽位链：small_model 节（base_url+model 配置齐全时直连，OpenAI 兼容 API，如硅基流动
-Qwen3.5-4B 免费档）→ 缺省回退 background 槽位（主聊天模型，deepseek-flash 实测
-disable_thinking 后 P50 约 560ms）。
-
-2026-10-02 实测：硅基流动 Qwen3.5-4B 免费档排队严重（尾部 59-90s），不作默认；
-deepseek-flash 关思考 559ms/6 token，标题质量与本地 ornith 相当，故默认走 background。
-参数（温度/max_tokens/输入截断）全部在 small_model 节配置化，superadmin 在线可调。
+v2.1.0 三模型收敛后不再有独立小模型槽位：压缩、标题、抽取全部走主模型
+（`get_aux_provider()`），辅助任务可用独立 aux_key 避免与主对话抢限流。
+请求固定关闭思考（DeepSeek 的 thinking={"type":"disabled"}，其他供应商忽略该字段）；
+参数（温度/max_tokens/输入截断）在 config.json agent 节配置化，superadmin 在线可调。
 """
 from __future__ import annotations
 
@@ -16,8 +13,8 @@ from typing import Any
 
 import httpx
 
-from backend.config import settings
-from backend.core.providers.llm import get_background_provider
+from backend.config import agent_param
+from backend.core.providers.llm import get_aux_provider
 
 logger = logging.getLogger(__name__)
 
@@ -37,58 +34,34 @@ TITLE_PROMPT = """给下面的汽车诊断对话开头起一个简短标题，�
 
 _TITLE_STRIP_CHARS = "《》\"'“”‘’·。.！!？?，,、；;：: \t\n\r"
 
-# 云端小模型请求超时：留足排队余量（免费档实测尾部可达数十秒，超时即静默降级）
-_REQUEST_TIMEOUT_S = 30.0
+# 辅助任务统一关闭思考，压缩标题/抽取的输出预算（供应商不支持该字段时忽略）
+_THINKING_DISABLED: dict[str, Any] = {"thinking": {"type": "disabled"}}
 
 
-def _sm_config(key: str, default: Any) -> Any:
-    return settings.small_model.get(key, default)
-
-
-async def _call_small_model(prompt: str, *, max_tokens: int, temperature: float) -> str:
-    """小模型槽位优先，缺省回退 background 槽位；返回 content（失败抛异常）。"""
-    if _sm_config("disable_thinking", True):
-        extra: dict[str, Any] = {"thinking": {"type": "disabled"}}
-    else:
-        extra = {}
-    base_url = str(_sm_config("base_url", "") or "").strip()
-    model = str(_sm_config("model", "") or "").strip()
-    if base_url and model:
-        headers = {"Content-Type": "application/json"}
-        api_key = str(_sm_config("api_key", "") or "").strip()
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        body = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            **extra,
-        }
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S, trust_env=False) as client:
-            resp = await client.post(f"{base_url.rstrip('/')}/chat/completions", json=body, headers=headers)
-            resp.raise_for_status()
-            return str(resp.json()["choices"][0]["message"]["content"] or "")
-    # 回退：主聊天模型（background 槽位，独立 Key 不挤占前台限速配额）
-    result = await get_background_provider().chat(
-        [{"role": "user", "content": prompt}], max_tokens=max_tokens, temperature=temperature, **extra
+async def _call_aux_model(prompt: str, *, max_tokens: int, temperature: float) -> str:
+    """调主模型（辅助 key 优先）；返回 content（失败抛异常）。"""
+    result = await get_aux_provider().chat(
+        [{"role": "user", "content": prompt}],
+        max_tokens=max_tokens,
+        temperature=temperature,
+        **_THINKING_DISABLED,
     )
     return result.content
 
 
 async def extract_case_notes(text: str) -> dict | None:
-    """调用小模型抽取状态卡初稿；不可用/失败/输出不合法一律返回 None。"""
+    """抽取状态卡初稿；不可用/失败/输出不合法一律返回 None。"""
     try:
-        content = await _call_small_model(
-            EXTRACT_PROMPT.format(text=text[: int(_sm_config("extract_input_chars", 800))]),
-            max_tokens=int(_sm_config("extract_max_tokens", 300)),
-            temperature=float(_sm_config("extract_temperature", 0.0)),
+        content = await _call_aux_model(
+            EXTRACT_PROMPT.format(text=text[: int(agent_param("extract_input_chars"))]),
+            max_tokens=int(agent_param("extract_max_tokens")),
+            temperature=float(agent_param("extract_temperature")),
         )
     except (httpx.HTTPError, KeyError, ValueError) as exc:
-        logger.warning("小模型抽取不可用（状态卡留空降级）：%s", exc)
+        logger.warning("辅助模型抽取不可用（状态卡留空降级）：%s", exc)
         return None
 
-    # 小模型习惯带 ```json fence 或前后缀，剥出首个 {...} 平衡块再解析
+    # 模型习惯带 ```json fence 或前后缀，剥出首个 {...} 平衡块再解析
     content = content.strip()
     start = content.find("{")
     if start < 0:
@@ -123,15 +96,15 @@ async def extract_case_notes(text: str) -> dict | None:
 
 
 async def generate_session_title(text: str) -> str | None:
-    """调用小模型生成会话标题；不可用/失败/空输出返回 None（调用方保留默认标题）。"""
+    """生成会话标题；不可用/失败/空输出返回 None（调用方保留默认标题）。"""
     try:
-        content = await _call_small_model(
-            TITLE_PROMPT.format(text=text[: int(_sm_config("title_input_chars", 500))]),
-            max_tokens=int(_sm_config("title_max_tokens", 60)),
-            temperature=float(_sm_config("title_temperature", 0.2)),
+        content = await _call_aux_model(
+            TITLE_PROMPT.format(text=text[: int(agent_param("title_input_chars"))]),
+            max_tokens=int(agent_param("title_max_tokens")),
+            temperature=float(agent_param("title_temperature")),
         )
     except (httpx.HTTPError, KeyError, ValueError) as exc:
-        logger.warning("小模型标题生成不可用（保留默认标题）：%s", exc)
+        logger.warning("辅助模型标题生成不可用（保留默认标题）：%s", exc)
         return None
     title = content.strip().strip(_TITLE_STRIP_CHARS)
     if not title:

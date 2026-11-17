@@ -13,8 +13,18 @@ from sqlalchemy import select
 
 from backend.api.deps import DbSession, require_roles
 from backend.core.agent.runner import normalize_diag
-from backend.db.models import AuditLog, Case, Message, Session as ChatSession, User
+from backend.db.models import (
+    Appointment,
+    AuditLog,
+    Case,
+    KbDocument,
+    Message,
+    Session as ChatSession,
+    User,
+    VehicleProfile,
+)
 from backend.rag import ingest
+from backend.rag.embedder import EmbedderUnavailable
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
 
@@ -47,6 +57,7 @@ def create_case(
     session = db.get(ChatSession, body.session_id)
     if session is None or session.tenant_id != user.tenant_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在")
+
     dup = db.execute(select(Case.id).where(Case.session_id == session.id).limit(1)).scalar()
     if dup:
         raise HTTPException(status.HTTP_409_CONFLICT, "该会话已沉淀过案例")
@@ -59,6 +70,27 @@ def create_case(
     ).scalar()
     if diag_msg is None or not diag_msg.diag_json:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "会话还没有结构化诊断结论，无法沉淀")
+    # 车主会话必须先有已完成工单且车主仍开放“对话可见”，否则案例沉淀会绕过隐私开关，
+    # 把首条原文写进全店共享知识库。staff 自建的店内诊断会话不涉及车主原文，放行。
+    if session.channel != "staff":
+        completed = db.execute(
+            select(Appointment.id)
+            .where(
+                Appointment.tenant_id == session.tenant_id,
+                Appointment.session_id == session.id,
+                Appointment.owner_id == session.user_id,
+                Appointment.status == "completed",
+            )
+            .limit(1)
+        ).scalar()
+        if completed is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, "仅已完成工单可沉淀案例")
+        owner = db.get(User, session.user_id)
+        if owner is None or not owner.privacy_share_dialog:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "车主未授权店员查看对话原文，不能沉淀案例",
+            )
     diag = normalize_diag(diag_msg.diag_json)  # 旧行可能是字符串数组等未守契约形状，先归一
     first_user = db.execute(
         select(Message)
@@ -76,11 +108,40 @@ def create_case(
         + [f"待确认：{c}" for c in diag.get("pending_checks", [])]
     )
 
+    case_title = diag.get("summary", session.title)[:256]
+    note = f"会话 #{session.id} 技师确认沉淀"
+
+    # 先入库知识库，再落 Case：嵌入失败时 ingest 会把文档标 failed 并抛错，
+    # 此时 Case 尚未写库，修好嵌入服务后可重试，不会被“已沉淀”409 卡死。
+    try:
+        doc, chunks = ingest.ingest_document(
+            db,
+            title=f"案例：{case_title}"[:256],
+            category="case",
+            source_note=note,
+            markdown_text=_case_markdown(symptoms, diagnosis_text, body.repair_result, vehicle),
+            min_chunk_chars=1,
+        )
+    except EmbedderUnavailable as exc:
+        # 清掉本次失败文档，避免重试堆积 failed 文档
+        stale_docs = db.execute(
+            select(KbDocument).where(
+                KbDocument.source_note == note,
+                KbDocument.status == "failed",
+            )
+        ).scalars().all()
+        for stale in stale_docs:
+            ingest.delete_document(db, stale.id)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "知识库向量化暂不可用，请稍后重试",
+        ) from exc
+
     case = Case(
         tenant_id=session.tenant_id,
         vehicle_id=session.vehicle_id,
         session_id=session.id,
-        title=diag.get("summary", session.title)[:256],
+        title=case_title,
         symptoms=symptoms,
         diagnosis=diagnosis_text,
         repair_result=body.repair_result,
@@ -88,17 +149,6 @@ def create_case(
     )
     db.add(case)
     db.flush()
-
-    # 数据飞轮：案例以 category="case" 摄入知识库，立即进入 kb_search 检索范围
-    # min_chunk_chars=1：案例各节普遍很短，禁用最小块长过滤，否则整篇会被丢成 0 块
-    doc, chunks = ingest.ingest_document(
-        db,
-        title=f"案例：{case.title}"[:256],
-        category="case",
-        source_note=f"会话 #{session.id} 技师确认沉淀",
-        markdown_text=_case_markdown(symptoms, diagnosis_text, body.repair_result, vehicle),
-        min_chunk_chars=1,
-    )
 
     db.add(
         AuditLog(
@@ -119,11 +169,12 @@ def list_cases(
     user: User = Depends(require_roles("staff", "admin")),
 ) -> dict:
     rows = db.execute(
-        select(Case)
+        select(Case, VehicleProfile)
+        .outerjoin(VehicleProfile, Case.vehicle_id == VehicleProfile.id)
         .where(Case.tenant_id == user.tenant_id)
         .order_by(Case.created_at.desc())
         .limit(100)
-    ).scalars().all()
+    ).all()
     return {
         "cases": [
             {
@@ -136,7 +187,11 @@ def list_cases(
                 "repair_result": c.repair_result,
                 "confirmed_by": c.confirmed_by,
                 "created_at": c.created_at.isoformat() if isinstance(c.created_at, datetime) else None,
+                "vehicle": " ".join(
+                    part for part in ((v.brand if v else ""), (v.model_name if v else "")) if part
+                ) if v else "",
+                "plate_no": (v.plate_no or "") if v else "",
             }
-            for c in rows
+            for c, v in rows
         ]
     }

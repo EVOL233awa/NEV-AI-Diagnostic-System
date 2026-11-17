@@ -38,7 +38,7 @@ class _FakeProvider:
 @pytest.fixture
 def fake_provider(monkeypatch: pytest.MonkeyPatch) -> _FakeProvider:
     provider = _FakeProvider()
-    monkeypatch.setattr(compressor, "get_background_provider", lambda: provider)
+    monkeypatch.setattr(compressor, "get_aux_provider", lambda: provider)
     return provider
 
 

@@ -3,13 +3,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.api import admin_diagnosis as admin_diagnosis_api
+from backend.api import asr as asr_api
 from backend.api import auth as auth_api
 from backend.api import cases as cases_api
+from backend.api import dtc as dtc_api
 from backend.api import chat as chat_api
 from backend.api import kb as kb_api
 from backend.api import appointments as appointments_api
@@ -57,11 +60,56 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        """安全响应头 + CSP（D24）：SPA 只加载同源脚本，样式允许 Element Plus 内联。"""
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault(
+            "Permissions-Policy", "microphone=(self), camera=(), geolocation=()"
+        )
+        # Swagger/ReDoc 依赖 CDN 脚本与内联引导，CSP 会使其不可用；文档页单独豁免
+        if not (
+            request.url.path.startswith("/docs")
+            or request.url.path.startswith("/redoc")
+            or request.url.path == "/openapi.json"
+        ):
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: blob:; "
+                "font-src 'self' data:; "
+                "media-src 'self' blob:; "
+                # 跨源 API base（superadmin 本机设置/HTTPS 部署）需放行；本地调试仅放回环
+                "connect-src 'self' https: http://localhost:* http://127.0.0.1:*; "
+                "worker-src 'self' blob:; "
+                "manifest-src 'self'; "
+                "object-src 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self'; "
+                "frame-ancestors 'none'",
+            )
+        is_https = request.url.scheme == "https" or request.headers.get(
+            "x-forwarded-proto", ""
+        ).lower() == "https"
+        if is_https:
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+        return response
+
     init_db()
     ensure_seed()
 
     app.include_router(system_api.router)
     app.include_router(auth_api.router)
+    app.include_router(asr_api.router)
+    app.include_router(dtc_api.router)
+    app.include_router(admin_diagnosis_api.router)
     app.include_router(kb_api.router)
     app.include_router(chat_api.router)
     app.include_router(cases_api.router)

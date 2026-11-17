@@ -17,6 +17,8 @@ from backend.rag.ingest import delete_document, ingest_document
 router = APIRouter(prefix="/api/kb", tags=["kb"])
 
 ALLOWED_SUFFIXES = {".pdf", ".docx", ".md", ".markdown", ".txt", ".csv", ".json"}
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+MAX_TEXT_CHARS = 2_000_000
 
 
 class SearchIn(BaseModel):
@@ -64,7 +66,17 @@ async def upload_document(
             suffix = ("." + (file.filename or "").rsplit(".", 1)[-1]).lower() if file.filename else ""
             if suffix not in ALLOWED_SUFFIXES:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, f"不支持的文件类型 {suffix}，支持：{sorted(ALLOWED_SUFFIXES)}")
-            data = await file.read()
+            if file.size is not None and file.size > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status.HTTP_413_CONTENT_TOO_LARGE,
+                    f"文件超过 {MAX_UPLOAD_BYTES // 1048576} MiB 限制",
+                )
+            data = await file.read(MAX_UPLOAD_BYTES + 1)
+            if len(data) > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status.HTTP_413_CONTENT_TOO_LARGE,
+                    f"文件超过 {MAX_UPLOAD_BYTES // 1048576} MiB 限制",
+                )
             doc, chunks = ingest_document(
                 db,
                 title=title or (file.filename or "未命名").rsplit(".", 1)[0],
@@ -76,6 +88,11 @@ async def upload_document(
                 file_kind=suffix,
             )
         elif markdown_text:
+            if len(markdown_text) > MAX_TEXT_CHARS:
+                raise HTTPException(
+                    status.HTTP_413_CONTENT_TOO_LARGE,
+                    f"文本超过 {MAX_TEXT_CHARS} 字符限制",
+                )
             doc, chunks = ingest_document(
                 db,
                 title=title or "未命名文档",

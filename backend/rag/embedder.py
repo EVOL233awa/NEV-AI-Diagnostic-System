@@ -22,7 +22,8 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 # 查询嵌入 LRU 缓存：同文本免二次云端调用（追问轮次/重试/同题复查场景）。
 # 512 条 × 1024 维 ≈ 4MB，2C2G 可承载；文档导入批量的重复文本同样受益。
 _EMBED_CACHE_MAX = 512
-_embed_cache: OrderedDict[str, tuple[float, ...]] = OrderedDict()
+_EmbedKey = tuple[str, str, str]  # (base_url, model, text)：热切换端点/模型后不得命中旧向量
+_embed_cache: OrderedDict[_EmbedKey, tuple[float, ...]] = OrderedDict()
 _embed_lock = threading.Lock()
 
 
@@ -52,9 +53,10 @@ class Embedder:
         missing: list[int] = []
         with _embed_lock:
             for i, text in enumerate(texts):
-                cached = _embed_cache.get(text)
+                cache_key = (self.base_url, self.model, text)
+                cached = _embed_cache.get(cache_key)
                 if cached is not None:
-                    _embed_cache.move_to_end(text)
+                    _embed_cache.move_to_end(cache_key)
                     results[i] = cached
                 else:
                     missing.append(i)
@@ -66,8 +68,9 @@ class Embedder:
                 for i in missing:
                     vector = tuple(by_text[texts[i]])
                     results[i] = vector
-                    _embed_cache[texts[i]] = vector
-                    _embed_cache.move_to_end(texts[i])
+                    cache_key = (self.base_url, self.model, texts[i])
+                    _embed_cache[cache_key] = vector
+                    _embed_cache.move_to_end(cache_key)
                 while len(_embed_cache) > _EMBED_CACHE_MAX:
                     _embed_cache.popitem(last=False)
         return [list(v) if v is not None else [] for v in results]

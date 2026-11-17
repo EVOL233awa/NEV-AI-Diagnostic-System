@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-11-17
+
+**三模型与全站 HMI 重做**：三模型收敛 + 语音输入 + 诊断质控 + C HMI 17 路由
+
+### Added
+
+- **三模型收敛**：主模型（对话 + `aux_key` 辅助任务）、嵌入模型、重排模型三槽位；压缩/标题/抽取改走主模型，`deepseek.aux_key` 可独立限流；旧 `small_model` / `background_*` / `subagent_url` 配置自动迁移并备份。
+- **联网检索供应商抽象**：DeepSeek 官方搜索（动态 `lang:`）、Tavily（basic/advanced）、自定义 OpenAI 兼容搜索；失败/空结果自动降级，来源与正文进入证据链。
+- **语音输入**：浏览器 16 kHz 单声道 WAV 录音 → `/api/asr/transcribe` → 文本回填；支持 DeepSeek 官方 ASR 与 OpenAI 兼容接口；服务端校验时长与上传大小，不落盘、不记录识别文本；前端新增 VoiceButton、录音状态机与 WAV 编码测试。
+- **诊断阶段与证据链**：接诊→假设→验证→结论阶段时间线，E1/E2… 证据编号与假设↔证据映射落库；管理员诊断质控页支持阶段/严重度筛选、证据关联率、原文受控查看并写审计。
+- **DTC 故障码速查**：店员端精确码表查询 + 知识块兜底 + 厂商专有码提示。
+- **车辆档案增强**：里程编辑、完整诊断历史分页（仅摘要/阶段，不含原文）。
+- **用量与限额**：搜索/ASR 写 `usage_stats`（次数/时长/成本），支持每用户每日搜索次数、ASR 秒数、全局美元预算；默认三项 `null` 不限制；限额拒绝写审计。
+- **superadmin 调试后台扩展**：搜索/ASR 供应商、限额、主模型 `aux_key`、固定密码来源展示与在线修改；配置 GET 全量掩码，PUT 留空保持、`__clear__` 清除。
+- **C HMI 设计系统**：17 条路由统一 AppShell / SideNav / TopBar / MobileTabBar，五档宽度适配、打印浅色主题、`prefers-reduced-motion`、44px 触控目标、跳过链接与焦点轮廓。
+- **安全加固**：CSP 与安全响应头、HSTS（HTTPS）、KB/ASR 上传体积与类型限制、案例沉淀隐私门槛、限额拒绝审计。
+
+### Changed
+
+- `data/config.json` 升级为 schema v2；启动时自动迁移、备份并原子写回。
+- superadmin 密码仅首次生成时打印；env/config 来源不回显。
+- 管理端诊断详情新增 `privacy_share_admin` 原文授权，默认仅显示脱敏内容。
+- 前端浏览器标题/PWA manifest/包版本统一为 2.1；README / 技术架构 / 操作指南与操作截图同步本轮 UI。
+
+### Fixed
+
+- 零会话状态发送首条消息被静默丢弃；聊天流 401 未清理 token；SSE 内部异常原文回传客户端。
+- 检索只召回已完成解析的文档；嵌入缓存按端点与模型隔离；agent 内知识库检索不再阻塞 SSE 事件循环。
+- 案例沉淀改为先写入知识库再落案例，嵌入失败可重试；失败文档不再进入证据链。
+
+### Removed
+
+- 旧 `small_model` / `background_*` / `subagent_url` / 顶层 `tavily` 配置节移除，分别并入主模型、嵌入/重排与 `search` 配置。
+
 ## [2.0.2] - 2026-10-02
 
 **RAG 检索降级链优化**：jieba 分词词典优化 + 嵌入缓存 + 检索档位日志
@@ -63,6 +97,8 @@ RAG 检索质量优化小版本：云端重排接入 + 修改config默认项 + s
 
 纯前端原型：单页应用（HTML/CSS/Vanilla JS）在浏览器内直接调用 LLM API，API Key 与会话记录存于 localStorage；内置静态知识库 + 场景识别 + 规则引擎提供检索问答；含「预约检修引导」占位入口。
 
+[2.1.0]: https://github.com/EVOL233awa/NEV-AI-Diagnostic-System/compare/v2.0.2...v2.1.0
+[2.0.2]: https://github.com/EVOL233awa/NEV-AI-Diagnostic-System/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/EVOL233awa/NEV-AI-Diagnostic-System/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/EVOL233awa/NEV-AI-Diagnostic-System/compare/v1.0...v2.0.0
 [1.0.0]: https://github.com/EVOL233awa/NEV-AI-Diagnostic-System/releases/tag/v1.0

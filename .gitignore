@@ -3,6 +3,7 @@ data/
 # 前端依赖与构建产物
 node_modules/
 frontend/dist/
+frontend/dist-mobile-check/
 # Python
 __pycache__/
 *.pyc

@@ -35,15 +35,18 @@ http.interceptors.request.use((config) => {
   return config
 })
 
+/** 401 统一出口：清 token 并回登录页（axios 与原生 fetch 的 SSE 共用）。 */
+export function handleAuthExpired(): void {
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(USER_KEY)
+  if (location.pathname !== '/login') location.href = '/login'
+}
+
 http.interceptors.response.use(
   (resp) => resp,
   (error) => {
     const status: number | undefined = error.response?.status
-    if (status === 401 && !location.hash.startsWith('#/login') && location.pathname !== '/login') {
-      localStorage.removeItem(TOKEN_KEY)
-      localStorage.removeItem(USER_KEY)
-      location.href = '/login'
-    }
+    if (status === 401) handleAuthExpired()
     return Promise.reject(error)
   },
 )
@@ -54,6 +57,7 @@ export interface AuthUser {
   role: 'owner' | 'staff' | 'admin' | 'superadmin'
   display_name: string
   privacy_share_dialog: boolean
+  privacy_share_admin: boolean
 }
 
 export interface LoginResp {
@@ -67,7 +71,13 @@ export interface HealthResp {
   app: string
   version: string
   time: string
-  providers: { main_model: string; web_search: boolean }
+  providers: {
+    main_model: string
+    web_search: boolean
+    search_provider?: 'deepseek' | 'tavily' | 'custom'
+    asr_configured?: boolean
+    asr_provider?: 'deepseek' | 'openai'
+  }
 }
 
 export function saveToken(token: string, user: AuthUser): void {
@@ -88,6 +98,26 @@ export async function fetchHealth(): Promise<HealthResp> {
 
 export async function login(username: string, password: string): Promise<LoginResp> {
   const { data } = await http.post<LoginResp>('/api/auth/login', { username, password })
+  return data
+}
+
+export interface TranscribeResp {
+  text: string
+  duration_ms: number
+  provider: string
+  request_id: string | null
+}
+
+/** 语音转文字：上传录音 Blob（multipart），返回可编辑文本；不自动发送。 */
+export async function transcribeAudio(
+  blob: Blob,
+  filename: string,
+  durationMs: number,
+): Promise<TranscribeResp> {
+  const form = new FormData()
+  form.append('file', blob, filename)
+  form.append('duration_ms', String(Math.max(0, Math.round(durationMs))))
+  const { data } = await http.post<TranscribeResp>('/api/asr/transcribe', form, { timeout: 90000 })
   return data
 }
 
@@ -248,6 +278,23 @@ export const SEVERITY_LABEL: Record<string, string> = {
   green: '正常',
 }
 
+export const DIAG_STAGE_LABEL: Record<string, string> = {
+  intake: '问诊',
+  hypothesis: '假设',
+  verification: '查证',
+  conclusion: '结论',
+}
+
+export interface DiagBrief {
+  session_id: number
+  severity: string
+  summary: string
+  session_title: string
+  stage: 'intake' | 'hypothesis' | 'verification' | 'conclusion' | null
+  has_case: boolean
+  created_at: string | null
+}
+
 export interface VehicleInfo {
   id: number
   vin: string
@@ -257,8 +304,9 @@ export interface VehicleInfo {
   model_year: string
   power_type: string
   notes: string
+  mileage: number | null
   is_default: boolean
-  history?: { severity: string; summary: string; session_title: string; created_at: string | null }[]
+  history?: DiagBrief[]
 }
 
 export async function listMyVehicles(): Promise<VehicleInfo[]> {
@@ -283,6 +331,15 @@ export async function deleteVehicle(id: number): Promise<{ ok: boolean }> {
 export async function searchVehicles(q: string): Promise<VehicleInfo[]> {
   const { data } = await http.get<{ vehicles: VehicleInfo[] }>('/api/vehicles/search', { params: { q } })
   return data.vehicles
+}
+
+export async function fetchVehicleHistory(
+  id: number,
+  limit = 20,
+  offset = 0,
+): Promise<{ vehicle_id: number; total: number; items: DiagBrief[] }> {
+  const { data } = await http.get(`/api/vehicles/${id}/history`, { params: { limit, offset } })
+  return data
 }
 
 export interface AdminUserInfo {
@@ -336,6 +393,30 @@ export interface AdminStats {
   appointments: Record<AppointmentStatus, number>
   cases: number
   users: number
+  consumption?: ConsumptionStats
+  usage_daily?: { date: string; calls: number; tokens_in: number; tokens_out: number; cost_usd: number }[]
+  appointments_daily?: { date: string; count: number }[]
+  severity?: { red: number; yellow: number; green: number; unknown: number }
+  stage_funnel?: { stage: string; count: number }[]
+  recent_activity?: { id: number; action: string; username: string; created_at: string | null }[]
+}
+
+export interface ConsumptionStats {
+  asr_seconds_today: number
+  search_calls_today: number
+  cost_today_usd: number
+  top_users: {
+    user_id: number | null
+    username: string
+    asr_seconds: number
+    search_calls: number
+    cost_usd: number
+  }[]
+  limits: {
+    asr_daily_seconds_per_user: number | null
+    search_daily_calls_per_user: number | null
+    global_daily_usd: number | null
+  }
 }
 
 export interface UsageWindow {
@@ -367,8 +448,10 @@ export async function fetchAuditLogs(action: string | null, limit = 100, offset 
   return data.logs
 }
 
-export async function updatePrivacy(share: boolean): Promise<void> {
-  await http.patch('/api/auth/privacy', { privacy_share_dialog: share })
+export async function updatePrivacy(
+  patch: { privacy_share_dialog?: boolean; privacy_share_admin?: boolean },
+): Promise<void> {
+  await http.patch('/api/auth/privacy', patch)
 }
 
 export interface CaseInfo {
@@ -381,6 +464,8 @@ export interface CaseInfo {
   repair_result: string
   confirmed_by: number | null
   created_at: string | null
+  vehicle?: string
+  plate_no?: string
 }
 
 export async function listCases(): Promise<CaseInfo[]> {
@@ -403,6 +488,12 @@ export interface ProviderSlotView {
   key_masked: string
 }
 
+export interface MainProviderView extends ProviderSlotView {
+  aux_has_key: boolean
+  aux_key_masked: string
+  aux_effective: boolean
+}
+
 export interface AgentParams {
   max_tool_rounds: number
   max_ask_user: number
@@ -414,6 +505,12 @@ export interface AgentParams {
   compress_token_budget: number
   compress_min_keep_rounds: number
   summary_max_chars: number
+  title_temperature: number
+  title_max_tokens: number
+  title_input_chars: number
+  extract_temperature: number
+  extract_max_tokens: number
+  extract_input_chars: number
 }
 
 export interface RerankView {
@@ -425,69 +522,139 @@ export interface RerankView {
   key_masked: string
 }
 
-export interface SmallModelView {
+export type SearchProviderName = 'deepseek' | 'tavily' | 'custom'
+
+export interface DeepSeekSearchView {
   base_url: string
-  model: string
   has_key: boolean
   key_masked: string
-  fallback: string
-  disable_thinking: boolean
-  title_temperature: number
-  title_max_tokens: number
-  title_input_chars: number
-  extract_temperature: number
-  extract_max_tokens: number
-  extract_input_chars: number
+  need_content: boolean
+  dynamic_language: boolean
+  timeout: number
 }
+
+export interface TavilySearchView {
+  has_key: boolean
+  key_masked: string
+  search_depth: 'basic' | 'advanced'
+  max_results: number
+  timeout: number
+}
+
+export interface CustomSearchView {
+  base_url: string
+  has_key: boolean
+  key_masked: string
+  timeout: number
+}
+
+export interface SearchConfigView {
+  provider: SearchProviderName
+  fallback_to_tavily: boolean
+  fallback_on_empty: boolean
+  count: number
+  content_max_chars: number
+  deepseek: DeepSeekSearchView
+  tavily: TavilySearchView
+  custom: CustomSearchView
+}
+
+export type AsrProviderName = 'deepseek' | 'openai'
+
+export interface AsrDeepSeekView {
+  base_url: string
+  has_key: boolean
+  key_masked: string
+  timeout: number
+}
+
+export interface AsrOpenAIView extends AsrDeepSeekView {
+  model: string
+}
+
+export interface AsrConfigView {
+  provider: AsrProviderName
+  max_seconds: number
+  max_bytes: number
+  deepseek: AsrDeepSeekView
+  openai: AsrOpenAIView
+}
+
+/** null = 不限制（演示默认） */
+export interface QuotaView {
+  asr_daily_seconds_per_user: number | null
+  search_daily_calls_per_user: number | null
+  global_daily_usd: number | null
+}
+
+export type PasswordSource = 'env' | 'config' | 'generated'
 
 export interface SuperadminConfig {
   providers: {
-    main: ProviderSlotView
-    background: ProviderSlotView
+    main: MainProviderView
     embedding: ProviderSlotView
     rerank: RerankView
-    small_model: SmallModelView
-    web_search: { has_key: boolean; key_masked: string }
-    subagent_url: string
   }
+  search: SearchConfigView
+  asr: AsrConfigView
+  quota: QuotaView
   agent: AgentParams
+  superadmin: { password_source: PasswordSource; password_set: boolean }
   server: { host: string; port: number; version: string; restart_required_keys: string[] }
 }
 
-/** PUT 载荷：api_key 缺省/空串 = 保持原值（后端语义），base_url/model 原样回传 */
+interface KeyPatch {
+  api_key?: string
+}
+
+/** PUT 载荷：api_key 缺省/空串 = 保持原值，显式 '__clear__' = 清除 */
 export interface SuperadminConfigPayload {
   providers?: {
-    main?: { base_url?: string; model?: string; api_key?: string }
-    background?: { base_url?: string; model?: string; api_key?: string }
-    embedding?: { base_url?: string; model?: string; api_key?: string }
+    main?: { base_url?: string; model?: string; aux_key?: string } & KeyPatch
+    embedding?: { base_url?: string; model?: string } & KeyPatch
     rerank?: {
       enabled?: boolean
       url?: string
       model?: string
-      api_key?: string
       score_threshold?: number
-    }
-    small_model?: {
-      base_url?: string
-      model?: string
-      api_key?: string
-      disable_thinking?: boolean
-      title_temperature?: number
-      title_max_tokens?: number
-      title_input_chars?: number
-      extract_temperature?: number
-      extract_max_tokens?: number
-      extract_input_chars?: number
-    }
-    web_search?: { api_key?: string }
-    subagent_url?: string
+    } & KeyPatch
   }
+  search?: {
+    provider?: SearchProviderName
+    fallback_to_tavily?: boolean
+    fallback_on_empty?: boolean
+    count?: number
+    content_max_chars?: number
+    deepseek?: {
+      base_url?: string
+      need_content?: boolean
+      dynamic_language?: boolean
+      timeout?: number
+    } & KeyPatch
+    tavily?: {
+      search_depth?: 'basic' | 'advanced'
+      max_results?: number
+      timeout?: number
+    } & KeyPatch
+    custom?: { base_url?: string; timeout?: number } & KeyPatch
+  }
+  asr?: {
+    provider?: AsrProviderName
+    max_seconds?: number
+    max_bytes?: number
+    deepseek?: { base_url?: string; timeout?: number } & KeyPatch
+    openai?: { base_url?: string; model?: string; timeout?: number } & KeyPatch
+  }
+  quota?: Partial<QuotaView>
   agent?: Partial<AgentParams>
 }
 
 export interface SlotTestResult {
   ok: boolean
   slot: string
+  provider?: string
+  count?: number
+  titles?: string[]
   model?: string
   reply?: string
   detail?: string
@@ -505,7 +672,187 @@ export async function saveSuperadminConfig(payload: SuperadminConfigPayload): Pr
   return data
 }
 
-export async function testProviderSlot(slot: 'main' | 'background' | 'embedding' | 'rerank' | 'small_model' | 'web_search'): Promise<SlotTestResult> {
+export async function testProviderSlot(
+  slot: 'main' | 'aux' | 'embedding' | 'rerank' | 'search',
+): Promise<SlotTestResult> {
   const { data } = await http.post<SlotTestResult>('/api/superadmin/config/test', { slot }, { timeout: 60000 })
+  return data
+}
+
+export async function testSearchProvider(provider?: SearchProviderName): Promise<SlotTestResult> {
+  const { data } = await http.post<SlotTestResult>(
+    '/api/superadmin/test/search',
+    { provider: provider ?? null },
+    { timeout: 60000 },
+  )
+  return data
+}
+
+export async function changeSuperadminPassword(newPassword: string): Promise<{
+  ok: boolean
+  password_source: PasswordSource
+  warning: string | null
+}> {
+  const { data } = await http.put<{ ok: boolean; password_source: PasswordSource; warning: string | null }>(
+    '/api/superadmin/password',
+    { new_password: newPassword },
+  )
+  return data
+}
+
+// ---------- 管理员诊断质控 ----------
+
+export type DiagStage = 'intake' | 'hypothesis' | 'verification' | 'conclusion'
+
+export interface DiagSessionRow {
+  id: number
+  title: string
+  status: string
+  channel: string
+  owner: { id: number | null; username: string; privacy_share_admin: boolean }
+  vehicle: {
+    id: number
+    brand: string
+    model_name: string
+    plate_no: string
+    vin: string
+    mileage: number | null
+  } | null
+  severity: string
+  summary: string
+  message_count: number
+  evidence_count: number
+  stage: DiagStage
+  stage_inferred: boolean
+  has_conclusion: boolean
+  updated_at: string | null
+  created_at: string | null
+}
+
+export interface DiagOverview {
+  today_sessions: number
+  active_sessions: number
+  total_sessions: number
+  conclusion_sessions: number
+  conclusion_rate: number
+  hypotheses_total: number
+  hypotheses_linked: number
+  evidence_link_rate: number
+  evidence_total: number
+}
+
+export interface DiagTrace {
+  id: number
+  message_id: number | null
+  evidence_key: string
+  kind: 'kb' | 'web'
+  provider: string
+  rank: number
+  domain: string
+  doc_id: number | null
+  chunk_id: number | null
+  score: number
+  created_at: string | null
+  query?: string
+  title?: string
+  url?: string
+  section_path?: string
+  snippet?: string
+}
+
+export interface DiagMessageView {
+  id: number
+  role: string
+  created_at: string | null
+  content: string
+  diag: Record<string, unknown> | null
+  raw_included: boolean
+}
+
+export interface DiagDetail {
+  session: {
+    id: number
+    title: string
+    status: string
+    channel: string
+    vehicle_id: number | null
+    case_notes: Record<string, unknown>
+    created_at: string | null
+    updated_at: string | null
+    stage: DiagStage
+    stage_history: { stage: DiagStage; at: string }[]
+    stage_inferred: boolean
+  }
+  owner: { id: number | null; username: string; privacy_share_admin: boolean }
+  vehicle: {
+    id: number
+    brand: string
+    model_name: string
+    model_year: string
+    plate_no: string
+    vin: string
+    mileage: number | null
+  } | null
+  messages: DiagMessageView[]
+  traces: DiagTrace[]
+  evidence_map: { message_id: number; title: string; evidence: DiagTrace[]; linked: boolean }[]
+  raw_included: boolean
+  counts: { kb_hits: number; web_hits: number; hypotheses: number; linked_hypotheses: number }
+}
+
+export async function listDiagSessions(params: {
+  q?: string
+  severity?: string
+  stage?: string
+  status?: string
+  limit?: number
+  offset?: number
+}): Promise<{ total: number; items: DiagSessionRow[] }> {
+  const { data } = await http.get('/api/admin/diagnosis/sessions', { params })
+  return data
+}
+
+export async function fetchDiagOverview(): Promise<DiagOverview> {
+  const { data } = await http.get<DiagOverview>('/api/admin/diagnosis/overview')
+  return data
+}
+
+export async function fetchDiagDetail(id: number): Promise<DiagDetail> {
+  const { data } = await http.get<DiagDetail>(`/api/admin/diagnosis/sessions/${id}`)
+  return data
+}
+
+// ---------- DTC 故障码速查 ----------
+
+export interface DtcEntry {
+  code: string
+  zh: string
+  note: string
+}
+
+export interface DtcDetail {
+  code: string
+  zh: string
+  note: string
+  source_note: string
+  doc_title: string
+  chunks: { document: string; section_path: string; snippet: string; source_note: string }[]
+  cases: {
+    id: number
+    title: string
+    symptoms: string
+    diagnosis: string
+    repair_result: string
+    created_at: string | null
+  }[]
+}
+
+export async function searchDtc(q: string, limit = 20): Promise<DtcEntry[]> {
+  const { data } = await http.get<{ results: DtcEntry[] }>('/api/dtc/search', { params: { q, limit } })
+  return data.results
+}
+
+export async function fetchDtc(code: string): Promise<DtcDetail> {
+  const { data } = await http.get<DtcDetail>(`/api/dtc/${encodeURIComponent(code)}`)
   return data
 }

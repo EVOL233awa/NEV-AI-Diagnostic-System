@@ -10,6 +10,7 @@ save_raw()，绝不能落到真实 data/config.json。种子（账号 + 演示�
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -19,16 +20,31 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# 必须在 backend.config 首次 import 前设置：load_settings() 在模块顶层执行，
+# 若触发 v2 配置迁移会改写真实 data/config.json（测试绝不允许）。
+# NEV_CONFIG_PATH 让 import 阶段就读取隔离配置，避免即使 skip 迁移也读到真实密钥。
+_TMP_DIR = Path(tempfile.mkdtemp(prefix="nev-diag-test-"))
+_CONFIG_PATH = _TMP_DIR / "config.json"
+_CONFIG_PATH.write_text(
+    json.dumps({
+        "server": {"host": "127.0.0.1", "port": 8600},
+        "security": {"jwt_secret": "test-only-jwt-secret-not-for-production"},
+    }),
+    encoding="utf-8",
+)
+os.environ["NEV_CONFIG_PATH"] = str(_CONFIG_PATH)
+os.environ["NEV_SKIP_CONFIG_MIGRATION"] = "1"
+
 import pytest
 
 import backend.config as backend_config
 
-_TMP_DIR = Path(tempfile.mkdtemp(prefix="nev-diag-test-"))
 backend_config.DB_PATH = _TMP_DIR / "test.db"
-backend_config.CONFIG_PATH = _TMP_DIR / "config.json"
-backend_config.CONFIG_PATH.write_text(
-    json.dumps({"server": {"host": "127.0.0.1", "port": 8600}}), encoding="utf-8"
-)
+backend_config.DATA_DIR = _TMP_DIR
+backend_config.CONFIG_PATH = _CONFIG_PATH
+# settings 已在 import 时从隔离配置构造；再做一次显式赋值，确保测试内 save_raw()
+# 与 settings.raw 指向同一份临时数据。
+backend_config.settings.raw = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
 
 from fastapi.testclient import TestClient  # noqa: E402
 

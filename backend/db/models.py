@@ -39,6 +39,8 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(64), default="")
     # 店员可见我的对话记录，默认开启
     privacy_share_dialog: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 管理员可查看我的对话原文（质量复核用），默认关闭；阶段/摘要/证据链不受此开关影响
+    privacy_share_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -60,6 +62,8 @@ class VehicleProfile(Base):
     model_year: Mapped[str] = mapped_column(String(16), default="")
     power_type: Mapped[str] = mapped_column(String(16), default="")  # EV / PHEV / ...
     notes: Mapped[str] = mapped_column(Text, default="")
+    # 里程（km，可选）：0–2,000,000，接口层校验
+    mileage: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 
@@ -93,9 +97,9 @@ class Session(Base):
     title: Mapped[str] = mapped_column(String(128), default="新诊断会话")
     status: Mapped[str] = mapped_column(String(16), default="active")  # active / closed
     # ask_user 待回答调用随会话落库，支持离线续答
-    pending_questions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    pending_questions: Mapped[list | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     # 诊断状态卡：update_case_notes 工具维护，每轮临时注入
-    case_notes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    case_notes: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     # 上下文压缩（双阀门）：前情摘要与已压缩消息边界（messages 原文保留）
     context_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     summarized_until_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -119,16 +123,45 @@ class Message(Base):
     session_id: Mapped[int] = mapped_column(ForeignKey("sessions.id"), index=True)
     role: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text, default="")
-    tool_calls: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    tool_calls: Mapped[list | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     tool_call_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Agentic 循环产物：诊断 JSON（严重度/故障假设/引用）与通俗摘要
-    diag_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    diag_json: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
     is_temp: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     session: Mapped[Session] = relationship(back_populates="messages")
+
+
+class RetrievalTrace(Base):
+    """检索证据链：一条命中 = 一行，按 evidence_key（E1/E2…）与诊断假设关联。
+
+    只用于管理员质控与统计；不进入模型上下文（工具结果文本除外），
+    不返回车主/店员接口。message_id 在最终 assistant 消息落库后回填；
+    会话级证据编号单调递增，跨工具调用与 ask_user 续答不冲突。
+    """
+
+    __tablename__ = "retrieval_traces"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("sessions.id"), index=True)
+    message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id"), nullable=True, index=True)
+    evidence_key: Mapped[str] = mapped_column(String(16), default="")  # E1、E2…
+    kind: Mapped[str] = mapped_column(String(8), default="kb")  # kb / web
+    query: Mapped[str] = mapped_column(Text, default="")
+    provider: Mapped[str] = mapped_column(String(32), default="")
+    rank: Mapped[int] = mapped_column(Integer, default=0)
+    title: Mapped[str] = mapped_column(String(256), default="")
+    url: Mapped[str] = mapped_column(String(1024), default="")
+    doc_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chunk_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    section_path: Mapped[str] = mapped_column(String(256), default="")
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    snippet: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
 
 
 class KbDocument(Base):
@@ -192,7 +225,7 @@ class Appointment(Base):
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicle_profiles.id"), nullable=True)
     session_id: Mapped[int | None] = mapped_column(ForeignKey("sessions.id"), nullable=True)
-    summary_card: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    summary_card: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     appointment_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending/accepted/completed/cancelled
     shop_note: Mapped[str] = mapped_column(Text, default="")
@@ -209,11 +242,11 @@ class ProviderConfig(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
-    slot: Mapped[str] = mapped_column(String(32), index=True)  # main/compression/embedding/rerank/subagent/web_search
+    slot: Mapped[str] = mapped_column(String(32), index=True)  # main/embedding/rerank/search/asr
     provider_type: Mapped[str] = mapped_column(String(32), default="")  # deepseek / tavily / llama-server / ...
     base_url: Mapped[str] = mapped_column(String(256), default="")
     model: Mapped[str] = mapped_column(String(128), default="")
-    params: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    params: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 
@@ -231,8 +264,10 @@ class UsageStat(Base):
     model: Mapped[str] = mapped_column(String(128), default="")
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
-    cost_estimate: Mapped[float | None] = mapped_column(Float, default=None, nullable=True)  # 元（估算）
+    # 统一 USD（估算）；主模型 token 成本无法可靠估算时为 None，仅搜索/ASR 有值
+    cost_estimate: Mapped[float | None] = mapped_column(Float, default=None, nullable=True)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)  # ASR 音频时长（毫秒）
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
 
 
@@ -245,6 +280,6 @@ class AuditLog(Base):
     tenant_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     action: Mapped[str] = mapped_column(String(64), index=True)
-    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    detail: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     ip: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)

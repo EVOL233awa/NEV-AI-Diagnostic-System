@@ -84,6 +84,7 @@ def _user_payload(user: User) -> dict:
         "role": user.role,
         "display_name": user.display_name or user.username,
         "privacy_share_dialog": user.privacy_share_dialog,
+        "privacy_share_admin": user.privacy_share_admin,
     }
 
 
@@ -135,16 +136,29 @@ def me(user: CurrentUser) -> dict:
 
 
 class PrivacyIn(BaseModel):
-    privacy_share_dialog: bool
+    privacy_share_dialog: bool | None = None
+    privacy_share_admin: bool | None = None
 
 
 @router.patch("/privacy")
 def update_privacy(body: PrivacyIn, user: CurrentUser, db: DbSession) -> dict:
-    """车主隐私开关：对之后的诊断立即生效。"""
-    user.privacy_share_dialog = body.privacy_share_dialog
-    db.add(AuditLog(user_id=user.id, action="privacy_update", detail={"value": body.privacy_share_dialog}))
+    """车主隐私开关：两个开关互不影响，分开更新、分开审计。"""
+    if body.privacy_share_dialog is None and body.privacy_share_admin is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "没有需要更新的隐私设置")
+    if body.privacy_share_dialog is not None:
+        user.privacy_share_dialog = body.privacy_share_dialog
+        db.add(AuditLog(user_id=user.id, action="privacy_update",
+                        detail={"field": "privacy_share_dialog", "value": body.privacy_share_dialog}))
+    if body.privacy_share_admin is not None:
+        user.privacy_share_admin = body.privacy_share_admin
+        db.add(AuditLog(user_id=user.id, action="privacy_update",
+                        detail={"field": "privacy_share_admin", "value": body.privacy_share_admin}))
     db.commit()
-    return {"ok": True, "privacy_share_dialog": user.privacy_share_dialog}
+    return {
+        "ok": True,
+        "privacy_share_dialog": user.privacy_share_dialog,
+        "privacy_share_admin": user.privacy_share_admin,
+    }
 
 
 @router.post("/change-password")

@@ -8,34 +8,63 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 
 from backend.api.deps import DbSession, require_roles
-from backend.db.models import AuditLog, Message, OwnerVehicle, Session as ChatSession, User, VehicleProfile
+from backend.db.models import (
+    AuditLog,
+    Case,
+    Message,
+    OwnerVehicle,
+    Session as ChatSession,
+    User,
+    VehicleProfile,
+)
 
 router = APIRouter(prefix="/api/vehicles", tags=["vehicles"])
 
 POWER_TYPES = ("EV", "PHEV", "REEV", "ICE", "")
 
 
-def _diag_briefs(db, vehicle_id: int, limit: int = 5) -> list[dict]:
+def _diag_briefs(db, vehicle_id: int, limit: int = 5, offset: int = 0) -> list[dict]:
     """某车的历史诊断摘要（severity + summary + 会话标题），不含对话原文。"""
     rows = db.execute(
-        select(Message.diag_json, Message.created_at, ChatSession.title)
+        select(
+            Message.diag_json,
+            Message.created_at,
+            ChatSession.id,
+            ChatSession.title,
+            ChatSession.case_notes,
+            Case.id,
+        )
         .join(ChatSession, Message.session_id == ChatSession.id)
+        .outerjoin(Case, Case.session_id == ChatSession.id)
         .where(ChatSession.vehicle_id == vehicle_id, Message.diag_json.is_not(None))
         .order_by(Message.id.desc())
         .limit(limit)
+        .offset(offset)
     ).all()
-    return [
-        {
+    items = []
+    for diag, created, session_id, title, notes, case_id in rows:
+        stage = notes.get("stage") if isinstance(notes, dict) else None
+        items.append({
+            "session_id": session_id,
             "severity": diag.get("severity", "?") if diag else "?",
             "summary": diag.get("summary", "") if diag else "",
             "session_title": title,
+            "stage": stage if stage in ("intake", "hypothesis", "verification", "conclusion") else None,
+            "has_case": case_id is not None,
             "created_at": created.isoformat(timespec="minutes") if created else None,
-        }
-        for diag, created, title in rows
-    ]
+        })
+    return items
+
+
+def _diag_count(db, vehicle_id: int) -> int:
+    return int(db.execute(
+        select(func.count(Message.id))
+        .join(ChatSession, Message.session_id == ChatSession.id)
+        .where(ChatSession.vehicle_id == vehicle_id, Message.diag_json.is_not(None))
+    ).scalar() or 0)
 
 
 def _profile_row(v: VehicleProfile, include_history: bool = False, db=None) -> dict:
@@ -48,6 +77,7 @@ def _profile_row(v: VehicleProfile, include_history: bool = False, db=None) -> d
         "model_year": v.model_year,
         "power_type": v.power_type,
         "notes": v.notes,
+        "mileage": v.mileage,
         "is_default": False,
     }
     if include_history and db is not None:
@@ -63,6 +93,12 @@ class UpsertVehicleIn(BaseModel):
     vin: str = Field(default="", max_length=32)
     plate_no: str = Field(default="", max_length=16)
     notes: str = Field(default="", max_length=500)
+    mileage: int | None = Field(default=None, description="里程 km（可选，0–2,000,000）")
+
+
+def _validate_mileage(value: int | None) -> None:
+    if value is not None and not (0 <= value <= 2_000_000):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "里程需在 0~2,000,000 km 之间")
 
 
 def _validate(body: UpsertVehicleIn) -> None:
@@ -70,6 +106,7 @@ def _validate(body: UpsertVehicleIn) -> None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "能源类型不合法")
     if not (body.brand or body.model_name or body.vin or body.plate_no):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "至少填写品牌/车型/VIN/车牌其一")
+    _validate_mileage(body.mileage)
 
 
 @router.get("")
@@ -103,6 +140,7 @@ def add_vehicle(body: UpsertVehicleIn, db: DbSession, user: User = Depends(requi
         model_year=body.model_year.strip(),
         power_type=body.power_type,
         notes=body.notes.strip(),
+        mileage=body.mileage,
     )
     db.add(profile)
     db.flush()
@@ -122,6 +160,7 @@ class PatchVehicleIn(BaseModel):
     power_type: str | None = None
     plate_no: str | None = Field(default=None, max_length=16)
     notes: str | None = Field(default=None, max_length=500)
+    mileage: int | None = Field(default=None)
     is_default: bool | None = None
 
 
@@ -142,6 +181,9 @@ def patch_vehicle(vehicle_id: int, body: PatchVehicleIn, db: DbSession, user: Us
         value = getattr(body, field)
         if value is not None:
             setattr(profile, field, str(value).strip())
+    if "mileage" in body.model_fields_set:
+        _validate_mileage(body.mileage)
+        profile.mileage = body.mileage
     if body.is_default:
         for other in db.execute(
             select(OwnerVehicle).where(OwnerVehicle.owner_id == user.id)
@@ -193,6 +235,37 @@ def delete_vehicle(vehicle_id: int, db: DbSession, user: User = Depends(require_
     ))
     db.commit()
     return {"ok": True}
+
+
+@router.get("/{vehicle_id}/history")
+def vehicle_history(
+    vehicle_id: int,
+    db: DbSession,
+    user: User = Depends(require_roles("owner", "staff", "admin")),
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """车辆完整诊断历史（摘要，无对话原文）：车主限自己名下，店员/管理员限本租户。"""
+    if limit < 1 or limit > 100:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "limit 需在 1~100 之间")
+    if offset < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "offset 不能为负")
+    vehicle = db.get(VehicleProfile, vehicle_id)
+    if vehicle is None or vehicle.tenant_id != user.tenant_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "车辆不存在")
+    if user.role == "owner":
+        bound = db.execute(
+            select(OwnerVehicle.id)
+            .where(OwnerVehicle.owner_id == user.id, OwnerVehicle.vehicle_id == vehicle_id)
+            .limit(1)
+        ).scalar()
+        if bound is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "车辆不存在或不在你名下")
+    return {
+        "vehicle_id": vehicle_id,
+        "total": _diag_count(db, vehicle_id),
+        "items": _diag_briefs(db, vehicle_id, limit=limit, offset=offset),
+    }
 
 
 @router.get("/search")

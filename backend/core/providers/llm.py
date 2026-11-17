@@ -1,7 +1,8 @@
 """LLM Provider 层：OpenAI 兼容聊天实现的抽象与 DeepSeek 适配。
 
-双 Key 隔离：主对话用 main_key，后台任务（压缩/标题/抽取）用 background_key。
-流式按 OpenAI SSE 协议解析；usage 统一通过 UsageRecord 回传供 usage_stats 落账。
+三模型收敛（v2.1.0）：主模型 / 嵌入 / 重排。压缩、标题、抽取全部走主模型；
+主模型可配两把 key——主对话用 main_key，辅助任务用 aux_key（空则回退 main_key），
+同一模型不算第四种模型。流式按 OpenAI SSE 协议解析；usage 统一回传供 usage_stats 落账。
 """
 from __future__ import annotations
 
@@ -163,14 +164,15 @@ def get_main_provider() -> LLMProvider:
     )
 
 
-def get_background_provider() -> LLMProvider:
-    """后台任务槽位（压缩/标题/抽取）：独立 Key，防挤占前台限速配额。
+def get_aux_provider() -> LLMProvider:
+    """辅助任务槽位（压缩/标题/抽取）：与主模型同 base_url/model，可配独立 aux_key。
 
-    background_base_url 缺省跟随主对话 base_url（老配置零迁移）。
+    aux_key 为空回退 main_key；独立 key 只用于避免辅助任务与主对话抢限流，
+    不改变模型种类。
     """
     ds = settings.deepseek
     return LLMProvider(
-        base_url=str(ds.get("background_base_url") or ds.get("base_url") or "https://api.deepseek.com").rstrip("/"),
-        api_key=ds.get("background_key", ds.get("main_key", "")),
-        model=ds.get("background_model", "deepseek-flash"),
+        base_url=str(ds.get("base_url") or "https://api.deepseek.com").rstrip("/"),
+        api_key=str(ds.get("aux_key") or ds.get("main_key") or ""),
+        model=str(ds.get("main_model") or "deepseek-flash"),
     )

@@ -125,27 +125,27 @@ class TestSuperadminRerankConfig:
         assert r.status_code == 400
         assert reranker_mod.settings.local_models.get("rerank_score_threshold") != 1.5
 
-    def test_put_small_model_params_and_validation(self, client, superadmin_headers):
+    def test_put_aux_task_params_and_validation(self, client, superadmin_headers):
+        import backend.config as config_mod
+
         r = client.put(
             "/api/superadmin/config",
             headers=superadmin_headers,
-            json={"providers": {"small_model": {"base_url": "https://api.siliconflow.cn",
-                                                "model": "Qwen/Qwen3.5-4B",
-                                                "title_temperature": 0.4, "title_max_tokens": 80}}},
+            json={"agent": {"title_temperature": 0.4, "title_max_tokens": 80,
+                            "extract_input_chars": 1200}},
         )
         assert r.status_code == 200
         cfg = client.get("/api/superadmin/config", headers=superadmin_headers).json()
-        sm = cfg["providers"]["small_model"]
-        assert sm["base_url"] == "https://api.siliconflow.cn"
-        assert sm["model"] == "Qwen/Qwen3.5-4B"
-        assert sm["title_temperature"] == 0.4
-        assert sm["title_max_tokens"] == 80
-        assert sm["fallback"]  # 视图回显 background 槽位模型名（回退说明）
+        assert cfg["agent"]["title_temperature"] == 0.4
+        assert cfg["agent"]["title_max_tokens"] == 80
+        assert cfg["agent"]["extract_input_chars"] == 1200
+        # 热生效：extractor 直读 agent_param
+        assert config_mod.agent_param("title_max_tokens") == 80
         # 越界拒绝
         r = client.put(
             "/api/superadmin/config",
             headers=superadmin_headers,
-            json={"providers": {"small_model": {"title_max_tokens": 99999}}},
+            json={"agent": {"title_max_tokens": 99999}},
         )
         assert r.status_code == 400
 

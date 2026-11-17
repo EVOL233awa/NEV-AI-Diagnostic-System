@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import uuid
 from typing import Annotated, AsyncIterator, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,11 +14,12 @@ from sqlalchemy import select
 
 from backend.api.deps import CurrentUser, DbSession
 from backend.core.agent.extractor import extract_case_notes, generate_session_title
-from backend.core.agent.runner import AgentRunner
+from backend.core.agent.runner import AgentRunner, public_diag
 from backend.db.base import SessionLocal
-from backend.db.models import Message, OwnerVehicle, Session as ChatSession
+from backend.db.models import Message, OwnerVehicle, Session as ChatSession, VehicleProfile
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+logger = logging.getLogger(__name__)
 
 # 历史里工具结果全文保留的最近轮数（当轮全文 + 2 轮后历史瘦身）
 SLIM_TOOL_ROUNDS = 2
@@ -115,15 +118,28 @@ def create_session(body: CreateSessionIn, user: CurrentUser, db: DbSession) -> d
 @router.get("/sessions")
 def list_sessions(user: CurrentUser, db: DbSession) -> dict:
     rows = db.execute(
-        select(ChatSession)
+        select(ChatSession, VehicleProfile)
+        .outerjoin(VehicleProfile, ChatSession.vehicle_id == VehicleProfile.id)
         .where(ChatSession.user_id == user.id)
         .order_by(ChatSession.updated_at.desc())
         .limit(50)
-    ).scalars().all()
+    ).all()
     return {
         "sessions": [
-            {"id": s.id, "title": s.title, "status": s.status, "has_pending": bool(s.pending_questions)}
-            for s in rows
+            {
+                "id": s.id,
+                "title": s.title,
+                "status": s.status,
+                "has_pending": bool(s.pending_questions),
+                "vehicle": {
+                    "id": v.id,
+                    "brand": v.brand,
+                    "model_name": v.model_name,
+                    "plate_no": v.plate_no or "",
+                    "mileage": v.mileage,
+                } if v else None,
+            }
+            for s, v in rows
         ]
     }
 
@@ -176,7 +192,8 @@ def list_messages(session_id: int, user: CurrentUser, db: DbSession) -> dict:
                     "id": m.id,
                     "role": "assistant",
                     "content": m.content,
-                    "diag": m.diag_json,
+                    # 车主/店员接口不暴露内部证据编号；管理员走 /api/admin/diagnosis
+                    "diag": public_diag(m.diag_json) if m.diag_json else None,
                     "tools": list(pending_traces),
                 })
                 pending_traces.clear()
@@ -187,7 +204,7 @@ def list_messages(session_id: int, user: CurrentUser, db: DbSession) -> dict:
 def _spawn_case_notes_extraction(session_id: int, content: str) -> None:
     """新会话首条描述 → 小模型异步抽取状态卡初稿（不阻塞主对话，失败留空）。
 
-    槽位链：small_model 配置节（云端 OpenAI 兼容 API）→ 缺省回退后台主聊天模型。
+    v2.1.0 起走主模型（辅助 key 优先），失败留空、不阻塞主对话。
     """
 
     async def _run() -> None:
@@ -324,8 +341,15 @@ async def _stream_turn(
         try:
             final = await runner.run_turn(db, session, history, user_content, emit)
             await queue.put(("stream_end", {"status": final}))
-        except Exception as exc:  # noqa: BLE001  兜底转 SSE 错误事件
-            await queue.put(("error", {"message": f"服务内部错误：{exc}"}))
+        except Exception:  # noqa: BLE001  兜底转 SSE 错误事件
+            # 完整堆栈只进服务端日志；客户端拿编号便于支持定位，不回传内部异常文本
+            request_id = uuid.uuid4().hex[:8]
+            logger.exception(
+                "对话流处理失败 request_id=%s session_id=%s", request_id, session.id
+            )
+            await queue.put(("error", {
+                "message": f"服务内部错误，请稍后重试（编号 {request_id}）",
+            }))
             await queue.put(("stream_end", {"status": "error"}))
 
     task = asyncio.create_task(run())

@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Back, ChatDotRound, Promotion } from '@element-plus/icons-vue'
+import { ChatDotRound, Menu, Operation, Promotion, Search } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
-import BackHome from '../components/BackHome.vue'
+import VoiceButton from '../components/VoiceButton.vue'
+import SeverityBadge from '../components/SeverityBadge.vue'
+import Sheet from '../components/Sheet.vue'
+import StatusChip from '../components/StatusChip.vue'
+import ContextPanel from '../components/chat/ContextPanel.vue'
+import type { StageStep } from '../components/ui-types'
 import { auth } from '../stores/auth'
-import { createAppointment, localIso } from '../api/client'
+import { createAppointment, fetchHealth, localIso } from '../api/client'
 import {
   type DiagHypothesis,
   type DiagResult,
@@ -20,10 +24,9 @@ import {
   streamChat,
 } from '../api/chat'
 
-const router = useRouter()
-
-// 模型输出是 markdown（加粗/列表/引用标注）；html:false 防注入，breaks 让单换行成段
-const md = new MarkdownIt({ html: false, breaks: true, linkify: false })
+// 模型输出是 markdown（加粗/列表/引用标注）；html:false 防注入，breaks 让单换行成段。
+// 禁用图片：网页检索结果可能被提示注入诱导输出外链图片，浏览器会自动请求造成数据外带。
+const md = new MarkdownIt({ html: false, breaks: true, linkify: false }).disable('image')
 
 /** diag_final 到达后把显示内容里的 ```json fence 剥掉，与后端落库口径一致 */
 function stripFence(text: string): string {
@@ -86,12 +89,7 @@ const CHAT_TAG: Record<string, string> = {
   owner: '车主端',
   staff: '店员 · 诊断台',
   admin: '管理端',
-}
-
-const SEVERITY_META: Record<string, { icon: string; label: string; color: string }> = {
-  green: { icon: '🟢', label: '正常 / 无需处理', color: 'var(--accent)' },
-  yellow: { icon: '🟡', label: '功能性异常 · 需尽快检查', color: '#e6a23c' },
-  red: { icon: '🔴', label: '安全风险 · 立即停止使用并进店', color: '#f56c6c' },
+  superadmin: '调试',
 }
 
 const SUGGESTIONS = [
@@ -100,24 +98,54 @@ const SUGGESTIONS = [
   '充电到 80% 就充不进去了，什么原因？',
 ]
 
-function sevMeta(severity: string): { icon: string; label: string; color: string } {
-  return SEVERITY_META[severity] ?? SEVERITY_META.yellow
-}
-
 const sessions = ref<SessionInfo[]>([])
 const activeId = ref<number | null>(null)
 const turns = ref<Turn[]>([])
 const input = ref('')
 const sending = ref(false)
 const drawerOpen = ref(false)
+const contextOpen = ref(false)
+const sessionQuery = ref('')
 const listEl = ref<HTMLElement | null>(null)
+const inputRef = ref<{ focus: () => void } | null>(null)
+// 语音 provider 决定解码失败时的兜底：OpenAI 兼容接口可直传原始格式
+const asrProvider = ref<'deepseek' | 'openai'>('deepseek')
 
 const activeSession = computed(() => sessions.value.find((s) => s.id === activeId.value) ?? null)
+const filteredSessions = computed(() => {
+  const q = sessionQuery.value.trim()
+  return q ? sessions.value.filter((s) => s.title.includes(q)) : sessions.value
+})
 const hasPending = computed(() => turns.value.some((t) => t.questions && t.questions.length > 0))
 const composerDisabled = computed(() => sending.value || hasPending.value)
 const placeholder = computed(() =>
   hasPending.value ? '请先回答上方的补充信息问题' : '描述车辆问题，例如：低速行驶时提示电池故障',
 )
+const latestDiag = computed(() => {
+  for (let i = turns.value.length - 1; i >= 0; i -= 1) {
+    if (turns.value[i].diag) return turns.value[i].diag
+  }
+  return null
+})
+const stageSteps = computed<StageStep[]>(() => {
+  const steps: StageStep[] = []
+  if (turns.value.some((t) => t.role === 'user')) steps.push({ stage: 'intake' })
+  if (turns.value.some((t) => t.tools.length)) steps.push({ stage: 'verification' })
+  if (latestDiag.value) steps.push({ stage: 'conclusion' })
+  return steps
+})
+const contextTools = computed(() =>
+  turns.value
+    .flatMap((turn) =>
+      turn.tools.map((tool) => ({
+        name: tool.name,
+        brief: toolBrief(tool.name, tool.args),
+        done: tool.result !== null,
+      })),
+    )
+    .slice(-10),
+)
+const role = computed(() => auth.user?.role ?? 'owner')
 
 function toolBrief(name: string, argsJson: string): string {
   const action = TOOL_ACTIONS[name] ?? name
@@ -232,9 +260,35 @@ async function sendContent(content: string): Promise<void> {
 
 async function onSend(): Promise<void> {
   const content = input.value.trim()
-  if (!content) return
+  if (!content || composerDisabled.value) return
+  // 新账号/会话列表为空时输入框仍可用：自动建会话后再发，不能清空输入后静默 return
+  if (activeId.value === null) {
+    sending.value = true
+    try {
+      const s = await createSession(content.slice(0, 24))
+      await refreshSessions()
+      activeId.value = s.id
+      turns.value = []
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '创建会话失败')
+      return
+    } finally {
+      sending.value = false
+    }
+  }
   input.value = ''
   await sendContent(content)
+}
+
+/** 语音转写结果追加到输入框（保留已有文字），聚焦但不自动发送。 */
+function onVoiceText(text: string): void {
+  const existing = input.value.trimEnd()
+  input.value = existing ? `${existing} ${text}` : text
+  void nextTick(() => inputRef.value?.focus())
+}
+
+function onVoiceError(message: string): void {
+  ElMessage.error(message)
 }
 
 async function quickAsk(question: string): Promise<void> {
@@ -384,6 +438,11 @@ async function submitBooking(): Promise<void> {
 }
 
 onMounted(async () => {
+  void fetchHealth()
+    .then((health) => {
+      if (health.providers.asr_provider === 'openai') asrProvider.value = 'openai'
+    })
+    .catch(() => undefined)
   await refreshSessions()
   if (sessions.value.length > 0) {
     await openSession(sessions.value[0].id)
@@ -393,40 +452,69 @@ onMounted(async () => {
 
 <template>
   <div class="chat-page">
-    <aside class="sidebar">
-      <div class="side-head">
-        <el-button :icon="Back" text size="small" @click="router.push({ name: 'home' })">主页</el-button>
-        <el-button type="primary" size="small" round @click="onNewSession">＋ 新话题</el-button>
+    <aside class="session-pane">
+      <div class="pane-head">
+        <div>
+          <h2>诊断会话</h2>
+          <span class="hmi-sub">{{ sessions.length }} 个</span>
+        </div>
+        <el-button type="primary" size="small" @click="onNewSession">＋ 新话题</el-button>
       </div>
+      <el-input v-model="sessionQuery" class="session-search" placeholder="搜索会话" clearable :prefix-icon="Search" size="small" aria-label="搜索诊断会话" />
       <div class="session-list">
-        <div
-          v-for="s in sessions"
+        <button
+          v-for="s in filteredSessions"
           :key="s.id"
+          type="button"
           class="session-item"
           :class="{ active: s.id === activeId }"
+          :aria-current="s.id === activeId ? 'true' : undefined"
           @click="openSession(s.id)"
         >
+          <span class="session-dot" :class="{ pending: s.has_pending }" aria-hidden="true"></span>
           <span class="session-title">{{ s.title }}</span>
-          <el-tag v-if="s.has_pending" size="small" type="warning" effect="plain">待补充</el-tag>
-        </div>
-        <p v-if="sessions.length === 0" class="empty-hint">还没有会话，点「新话题」开始</p>
+          <span v-if="s.has_pending" class="pending-tag">待补充</span>
+        </button>
+        <p v-if="filteredSessions.length === 0" class="empty-hint">
+          {{ sessionQuery ? '没有匹配的会话' : '还没有会话，点「新话题」开始' }}
+        </p>
+      </div>
+      <div class="pane-foot">
+        <span class="hmi-sub">会话自动按默认车辆归档</span>
       </div>
     </aside>
 
     <main class="chat-main">
-      <header class="chat-header">
-        <el-button class="mobile-only" :icon="ChatDotRound" text @click="drawerOpen = true" />
-        <BackHome />
-        <span class="chat-title">{{ activeSession?.title ?? 'AI 诊断助手' }}</span>
-        <el-tag size="small" type="success" effect="dark">{{ CHAT_TAG[auth.user?.role ?? 'owner'] }}</el-tag>
+      <header class="chat-head">
+        <el-button class="mobile-only" :icon="Menu" text aria-label="打开会话列表" @click="drawerOpen = true" />
+        <div class="title-block">
+          <strong>{{ activeSession?.title ?? 'AI 诊断助手' }}</strong>
+          <span class="hmi-sub">{{ CHAT_TAG[role] }}</span>
+        </div>
+        <div class="head-meta">
+          <StatusChip
+            v-if="activeSession?.vehicle"
+            :label="activeSession.vehicle.plate_no || activeSession.vehicle.model_name || '已关联车辆'"
+            tone="info"
+          />
+          <StatusChip v-if="hasPending" label="待补充信息" tone="warn" dot />
+          <StatusChip v-if="role === 'admin' && latestDiag" label="已出结论" tone="ok" dot />
+        </div>
+        <el-button class="mobile-only" :icon="Operation" text aria-label="打开上下文" @click="contextOpen = true" />
       </header>
 
       <div ref="listEl" class="msg-list">
         <div v-if="turns.length === 0" class="hero">
-          <h2>新能源汽车 AI 诊断助手</h2>
-          <p>描述你的车辆问题，我会先查证据再下结论；信息不够时我会向你提问。</p>
+          <span class="hero-mark" aria-hidden="true"><el-icon :size="26"><ChatDotRound /></el-icon></span>
+          <h2>先说症状，再一起查证</h2>
+          <p>我会先检索知识库、故障码与车辆档案，证据不足时向你提问；结论会标注严重度与到店确认项。</p>
+          <div class="capability-row">
+            <StatusChip label="知识库取证" tone="info" />
+            <StatusChip label="故障码定位" tone="accent" />
+            <StatusChip label="网页核实" tone="neutral" />
+          </div>
           <div class="suggest-row">
-            <button v-for="q in SUGGESTIONS" :key="q" class="suggest-chip" @click="quickAsk(q)">
+            <button v-for="q in SUGGESTIONS" :key="q" type="button" class="suggest-chip" @click="quickAsk(q)">
               {{ q }}
             </button>
           </div>
@@ -444,15 +532,14 @@ onMounted(async () => {
                 class="tl-step"
                 :class="{ done: t.result !== null }"
               >
-                <span class="tl-dot">{{ t.result === null ? '' : '✓' }}</span>
+                <span class="tl-dot" aria-hidden="true">{{ t.result === null ? '' : '✓' }}</span>
                 <span class="tl-text">
                   {{ t.result === null ? `正在${toolBrief(t.name, t.args)}…` : `已${toolBrief(t.name, t.args)}` }}
                 </span>
               </div>
             </div>
 
-            <!-- 流式正文不逐字显示：模型输出是 markdown，半截原文体验差；
-                 结束后一次性渲染最终结果 -->
+            <!-- 流式正文不逐字显示：模型输出是 markdown，半截原文体验差；结束后一次性渲染 -->
             <div
               v-if="turn.content && !turn.streaming"
               class="bubble assistant md-body"
@@ -469,16 +556,19 @@ onMounted(async () => {
                   <button
                     v-for="opt in filterOptions(q)"
                     :key="opt"
+                    type="button"
                     class="opt-chip"
                     :class="{ active: turn.answers[q.id] === opt }"
+                    :aria-pressed="turn.answers[q.id] === opt"
                     @click="toggleOpt(turn, q.id, opt)"
                   >
                     {{ opt }}
                   </button>
-                  <!-- 兜底选项：车主无法判断现象时也能继续，避免问答阻塞主流程 -->
                   <button
+                    type="button"
                     class="opt-chip"
                     :class="{ active: turn.answers[q.id] === UNCLEAR_VALUE }"
+                    :aria-pressed="turn.answers[q.id] === UNCLEAR_VALUE"
                     @click="toggleOpt(turn, q.id, UNCLEAR_VALUE)"
                   >
                     {{ UNCLEAR_LABEL }}
@@ -492,37 +582,23 @@ onMounted(async () => {
                   clearable
                 />
               </div>
-              <el-button
-                type="primary"
-                size="small"
-                round
-                :disabled="sending"
-                @click="submitAnswers(turn)"
-              >
+              <el-button type="primary" size="small" :disabled="sending" @click="submitAnswers(turn)">
                 提交并继续诊断
               </el-button>
             </div>
 
             <!-- 三段式诊断卡片：严重度 + 结论 + 假设 + 步骤 + 待确认 -->
-            <div
-              v-if="turn.diag"
-              class="diag-card"
-              :style="{ borderColor: sevMeta(turn.diag.severity).color }"
-            >
+            <div v-if="turn.diag" class="diag-card" :data-severity="turn.diag.severity">
               <div class="diag-head">
-                <span class="diag-icon">{{ sevMeta(turn.diag.severity).icon }}</span>
-                <span class="diag-label" :style="{ color: sevMeta(turn.diag.severity).color }">
-                  {{ sevMeta(turn.diag.severity).label }}
-                </span>
+                <SeverityBadge :severity="turn.diag.severity" />
+                <span class="diag-title">AI 诊断结论</span>
               </div>
               <p class="diag-summary">{{ turn.diag.summary }}</p>
               <div v-if="turn.diag.hypotheses?.length" class="diag-sec">
                 <p class="sec-title">可能原因</p>
                 <ul>
                   <!-- 车主端不显示来源详情：hypotheses.evidence（依据 [1] …）不再渲染 -->
-                  <li v-for="(h, i) in turn.diag.hypotheses" :key="hypTitle(h) || i">
-                    {{ hypTitle(h) }}
-                  </li>
+                  <li v-for="(h, hi) in turn.diag.hypotheses" :key="hypTitle(h) || hi">{{ hypTitle(h) }}</li>
                 </ul>
               </div>
               <div v-if="turn.diag.steps?.length" class="diag-sec">
@@ -537,25 +613,18 @@ onMounted(async () => {
                   <li v-for="c in turn.diag.pending_checks" :key="c">{{ c }}</li>
                 </ul>
               </div>
-              <p
-                v-if="evidenceLine(turn)"
-                class="evidence-line"
-              >
-                ✓ {{ evidenceLine(turn) }}
-              </p>
+              <p v-if="evidenceLine(turn)" class="evidence-line">✓ {{ evidenceLine(turn) }}</p>
               <el-button
                 v-if="turn.diag.severity !== 'green'"
                 class="book-btn"
                 type="warning"
                 size="small"
-                round
                 @click="onBook"
               >
-                📅 一键预约进店检修
+                预约进店检修
               </el-button>
             </div>
 
-            <!-- 首步等待（尚未调用任何工具）：给出拟人化状态而不是裸转圈 -->
             <span v-if="turn.streaming && !turn.diag && turn.tools.length === 0" class="typing">
               正在分析您的问题…
             </span>
@@ -564,164 +633,260 @@ onMounted(async () => {
       </div>
 
       <footer class="composer">
-        <el-input
-          v-model="input"
-          type="textarea"
-          :autosize="{ minRows: 1, maxRows: 4 }"
-          :placeholder="placeholder"
+        <VoiceButton
+          v-if="auth.user && auth.user.role !== 'superadmin'"
           :disabled="composerDisabled"
-          resize="none"
-          @keydown.enter.exact.prevent="onSend"
+          :provider="asrProvider"
+          @transcribed="onVoiceText"
+          @error="onVoiceError"
         />
+        <div class="composer-input">
+          <el-input
+            ref="inputRef"
+            v-model="input"
+            type="textarea"
+            :autosize="{ minRows: 1, maxRows: 4 }"
+            :placeholder="placeholder"
+            :disabled="composerDisabled"
+            resize="none"
+            aria-label="输入车辆问题"
+            @keydown.enter.exact.prevent="onSend"
+          />
+          <span class="composer-hint">Enter 发送 · Shift + Enter 换行 · 语音文本需确认后发送</span>
+        </div>
         <el-button
+          class="send-btn"
           type="primary"
           :icon="Promotion"
           :loading="sending"
           :disabled="composerDisabled"
+          aria-label="发送消息"
           @click="onSend"
         >
           发送
         </el-button>
       </footer>
-
-      <!-- 一键预约弹窗（全局唯一实例，诊断卡按钮打开） -->
-      <el-dialog v-model="bookDialogVisible" title="预约进店检修" width="400px">
-        <el-form label-width="90px">
-          <el-form-item label="到店时间">
-            <el-date-picker
-              v-model="bookTime"
-              type="datetime"
-              placeholder="选择日期和时间"
-              format="YYYY-MM-DD HH:mm"
-            />
-          </el-form-item>
-          <el-form-item label="补充说明">
-            <el-input v-model="bookNote" type="textarea" :rows="2" maxlength="300" placeholder="选填" />
-          </el-form-item>
-        </el-form>
-        <p class="book-tip">提交后将自动携带车辆档案与本轮 AI 诊断摘要，门店无需复述问题。</p>
-        <template #footer>
-          <el-button @click="bookDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="booking" @click="submitBooking">提交预约</el-button>
-        </template>
-      </el-dialog>
     </main>
 
-    <el-drawer v-model="drawerOpen" title="会话列表" size="75%" direction="ltr">
-      <el-button type="primary" round style="width: 100%" @click="onNewSession">＋ 新话题</el-button>
+    <aside class="context-pane">
+      <ContextPanel
+        :role="role"
+        :vehicle="activeSession?.vehicle ?? null"
+        :diag="latestDiag"
+        :stages="stageSteps"
+        :tools="contextTools"
+        :privacy-dialog="auth.user?.privacy_share_dialog ?? false"
+        :privacy-admin="auth.user?.privacy_share_admin ?? false"
+      />
+    </aside>
+
+    <el-drawer v-model="drawerOpen" title="诊断会话" size="78%" direction="ltr">
+      <el-button type="primary" style="width: 100%" @click="onNewSession">＋ 新话题</el-button>
       <div class="session-list drawer-list">
-        <div
+        <button
           v-for="s in sessions"
           :key="s.id"
+          type="button"
           class="session-item"
           :class="{ active: s.id === activeId }"
           @click="openSession(s.id)"
         >
+          <span class="session-dot" :class="{ pending: s.has_pending }" aria-hidden="true"></span>
           <span class="session-title">{{ s.title }}</span>
-          <el-tag v-if="s.has_pending" size="small" type="warning" effect="plain">待补充</el-tag>
-        </div>
+          <span v-if="s.has_pending" class="pending-tag">待补充</span>
+        </button>
       </div>
     </el-drawer>
+
+    <Sheet v-model="contextOpen" title="诊断上下文">
+      <ContextPanel
+        :role="role"
+        :vehicle="activeSession?.vehicle ?? null"
+        :diag="latestDiag"
+        :stages="stageSteps"
+        :tools="contextTools"
+        :privacy-dialog="auth.user?.privacy_share_dialog ?? false"
+        :privacy-admin="auth.user?.privacy_share_admin ?? false"
+      />
+    </Sheet>
+
+    <!-- 一键预约弹窗（全局唯一实例，诊断卡按钮打开） -->
+    <el-dialog v-model="bookDialogVisible" title="预约进店检修" width="min(92vw, 420px)">
+      <el-form label-width="90px">
+        <el-form-item label="到店时间">
+          <el-date-picker
+            v-model="bookTime"
+            type="datetime"
+            placeholder="选择日期和时间"
+            format="YYYY-MM-DD HH:mm"
+          />
+        </el-form-item>
+        <el-form-item label="补充说明">
+          <el-input v-model="bookNote" type="textarea" :rows="2" maxlength="300" placeholder="选填" />
+        </el-form-item>
+      </el-form>
+      <p class="book-tip">提交后将自动携带车辆档案与本轮 AI 诊断摘要，门店无需复述问题。</p>
+      <template #footer>
+        <el-button @click="bookDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="booking" @click="submitBooking">提交预约</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .chat-page {
   display: flex;
-  height: 100vh;
-  /* 移动端动态视口：键盘弹起/地址栏收展时高度正确（不支持 dvh 的内核回落 100vh） */
-  height: 100dvh;
+  block-size: calc(100vh - var(--hmi-topbar-h));
+  block-size: calc(100dvh - var(--hmi-topbar-h));
   overflow: hidden;
+  background: var(--hmi-bg);
 }
 
-.sidebar {
-  width: 232px;
-  flex-shrink: 0;
+.session-pane {
+  inline-size: 246px;
+  flex: none;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--hmi-line);
+  background: rgba(11, 18, 23, 0.7);
 }
 
-.side-head {
+.pane-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.6rem 0.7rem;
-  border-bottom: 1px solid var(--border);
+  gap: 0.5rem;
+  padding: 0.8rem 0.8rem 0.55rem;
+}
+
+.pane-head h2 {
+  font-size: var(--hmi-fs-4);
+  font-weight: 650;
+}
+
+.session-search {
+  padding-inline: 0.7rem;
+  margin-block-end: 0.4rem;
 }
 
 .session-list {
-  flex: 1;
+  flex: 1 1 auto;
   overflow-y: auto;
-  padding: 0.5rem;
+  padding: 0.25rem 0.55rem;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 2px;
 }
 
 .session-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.4rem;
-  padding: 0.5rem 0.6rem;
-  border-radius: 8px;
+  gap: 0.45rem;
+  inline-size: 100%;
+  min-block-size: 38px;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: var(--hmi-radius-sm);
+  background: transparent;
+  color: var(--hmi-text-2);
+  font-size: var(--hmi-fs-2);
+  text-align: start;
   cursor: pointer;
-  font-size: 0.78rem;
-  color: var(--text);
 }
 
 .session-item:hover {
-  background: rgba(45, 212, 168, 0.08);
+  background: var(--hmi-surface-2);
+  color: var(--hmi-text);
 }
 
 .session-item.active {
-  background: rgba(45, 212, 168, 0.14);
+  background: var(--hmi-accent-soft);
+  border-color: var(--hmi-accent-line);
+  color: var(--hmi-accent);
+}
+
+.session-dot {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: var(--hmi-line-strong);
+  flex: none;
+}
+
+.session-dot.pending {
+  background: var(--hmi-warn);
 }
 
 .session-title {
+  flex: 1 1 auto;
+  min-inline-size: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.pending-tag {
+  flex: none;
+  color: var(--hmi-warn);
+  font-size: 0.62rem;
+}
+
 .empty-hint {
-  color: var(--muted);
-  font-size: 0.72rem;
+  color: var(--hmi-text-3);
+  font-size: var(--hmi-fs-2);
   text-align: center;
-  margin-top: 1rem;
+  padding: 1.4rem 0.5rem;
+}
+
+.pane-foot {
+  padding: 0.55rem 0.8rem;
+  border-block-start: 1px solid var(--hmi-line-soft);
 }
 
 .chat-main {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-inline-size: 0;
   display: flex;
   flex-direction: column;
 }
 
-.chat-header {
+.chat-head {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.55rem 1rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  gap: 0.55rem;
+  min-block-size: 52px;
+  padding: 0.45rem 0.9rem;
+  border-block-end: 1px solid var(--hmi-line);
+  background: rgba(11, 18, 23, 0.55);
 }
 
-.chat-title {
-  flex: 1;
-  font-size: 0.9rem;
+.title-block {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+}
+
+.title-block strong {
+  font-size: var(--hmi-fs-3);
   font-weight: 600;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.head-meta {
+  margin-inline-start: auto;
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .msg-list {
-  flex: 1;
+  flex: 1 1 auto;
   overflow-y: auto;
-  padding: 1.1rem 1rem;
+  padding: 1rem clamp(0.7rem, 2vw, 1.3rem);
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
@@ -730,157 +895,167 @@ onMounted(async () => {
 .hero {
   margin: auto;
   text-align: center;
-  max-width: 480px;
+  max-inline-size: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.hero-mark {
+  display: grid;
+  place-items: center;
+  inline-size: 54px;
+  block-size: 54px;
+  border-radius: 16px;
+  color: var(--hmi-accent);
+  background: var(--hmi-accent-soft);
+  border: 1px solid var(--hmi-accent-line);
 }
 
 .hero h2 {
-  font-size: 1.2rem;
-  margin: 0 0 0.5rem;
+  font-size: clamp(1.1rem, 2vw, 1.35rem);
+  font-weight: 650;
 }
 
 .hero p {
-  color: var(--muted);
-  font-size: 0.82rem;
-  margin: 0 0 1.2rem;
+  color: var(--hmi-text-3);
+  font-size: var(--hmi-fs-2);
+  line-height: 1.7;
+}
+
+.capability-row {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .suggest-row {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.45rem;
+  inline-size: 100%;
+  margin-block-start: 0.5rem;
 }
 
 .suggest-chip {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
-  font-size: 0.8rem;
-  padding: 0.55rem 0.8rem;
+  background: var(--hmi-surface);
+  border: 1px solid var(--hmi-line);
+  border-radius: var(--hmi-radius);
+  color: var(--hmi-text-2);
+  font-size: var(--hmi-fs-2);
+  padding: 0.6rem 0.8rem;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
 }
 
 .suggest-chip:hover {
-  border-color: var(--accent);
+  border-color: var(--hmi-accent-line);
+  color: var(--hmi-text);
 }
 
 .bubble-row.user {
   align-self: flex-end;
-  max-width: 78%;
+  max-inline-size: 78%;
   background: var(--user-bg);
+  border: 1px solid var(--hmi-accent-line);
   border-radius: 12px 12px 2px 12px;
-  padding: 0.6rem 0.85rem;
-  font-size: 0.85rem;
+  padding: 0.55rem 0.8rem;
+  font-size: var(--hmi-fs-3);
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .assistant-block {
   align-self: flex-start;
-  max-width: 88%;
+  max-inline-size: 88%;
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
 }
 
-/* 查证时间线：左侧圆点+竖线串联，进行中呼吸闪烁，完成变实心对勾 */
 .tool-timeline {
   align-self: flex-start;
   display: flex;
   flex-direction: column;
-  background: var(--assistant-bg);
-  border: 1px dashed var(--border);
-  border-radius: 10px;
-  padding: 0.5rem 0.75rem;
+  background: var(--hmi-surface);
+  border: 1px solid var(--hmi-line-soft);
+  border-radius: var(--hmi-radius);
+  padding: 0.4rem 0.65rem;
 }
 
 .tl-step {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.22rem 0;
-}
-
-/* 竖线：连接相邻步骤的圆点 */
-.tl-step:not(:last-child)::after {
-  content: '';
-  position: absolute;
-  left: 7px;
-  top: calc(50% + 6px);
-  bottom: -10px;
-  width: 1px;
-  background: var(--border);
+  gap: 0.45rem;
+  padding: 0.18rem 0;
 }
 
 .tl-dot {
-  flex-shrink: 0;
-  width: 15px;
-  height: 15px;
+  flex: none;
+  inline-size: 14px;
+  block-size: 14px;
   border-radius: 50%;
-  border: 1.5px solid var(--border);
+  border: 1.5px solid var(--hmi-line-strong);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.6rem;
-  color: var(--accent);
+  font-size: 0.58rem;
+  color: var(--hmi-accent);
 }
 
 .tl-step.done .tl-dot {
-  border-color: var(--accent);
-  background: rgba(45, 212, 168, 0.16);
+  border-color: var(--hmi-accent);
+  background: var(--hmi-accent-soft);
 }
 
 .tl-step:not(.done) .tl-dot {
-  border-color: var(--accent);
+  border-color: var(--hmi-accent);
   animation: tl-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes tl-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(45, 212, 168, 0.35);
+    box-shadow: 0 0 0 0 rgba(53, 214, 194, 0.3);
   }
   50% {
-    box-shadow: 0 0 0 5px rgba(45, 212, 168, 0.06);
+    box-shadow: 0 0 0 5px rgba(53, 214, 194, 0.05);
   }
 }
 
 .tl-text {
-  font-size: 0.74rem;
-  color: var(--muted);
+  font-size: var(--hmi-fs-1);
+  color: var(--hmi-text-3);
 }
 
 .tl-step.done .tl-text {
-  color: var(--text);
+  color: var(--hmi-text-2);
 }
 
 .typing {
-  color: var(--muted);
-  font-size: 0.78rem;
+  color: var(--hmi-text-3);
+  font-size: var(--hmi-fs-2);
   animation: tl-pulse 1.2s ease-in-out infinite;
 }
 
-/* 诊断卡置信信号：聚合查证声明（不带来源细节） */
 .evidence-line {
   margin: 0;
-  font-size: 0.72rem;
-  color: var(--accent);
-  opacity: 0.85;
+  font-size: var(--hmi-fs-1);
+  color: var(--hmi-accent);
 }
 
 .bubble.assistant {
-  background: var(--assistant-bg);
-  border: 1px solid var(--border);
+  background: var(--hmi-surface);
+  border: 1px solid var(--hmi-line);
   border-radius: 12px 12px 12px 2px;
   padding: 0.6rem 0.85rem;
-  font-size: 0.85rem;
-  white-space: pre-wrap;
-  word-break: break-word;
+  font-size: var(--hmi-fs-3);
+  overflow-wrap: anywhere;
 }
 
-/* markdown 渲染后的气泡：结构化标签自带换行，关掉 pre-wrap 并收紧行距 */
 .bubble.assistant.md-body {
   white-space: normal;
 }
@@ -896,26 +1071,28 @@ onMounted(async () => {
 .md-body :deep(ul),
 .md-body :deep(ol) {
   margin: 0.25em 0;
-  padding-left: 1.3em;
+  padding-inline-start: 1.3em;
 }
 
 .md-body :deep(h1),
 .md-body :deep(h2),
 .md-body :deep(h3) {
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   margin: 0.4em 0 0.3em;
 }
 
-.book-tip {
-  color: var(--muted);
-  font-size: 0.75rem;
-  margin: 0.4rem 0 0;
+.md-body :deep(code) {
+  font-family: var(--hmi-font-mono);
+  font-size: 0.85em;
+  padding: 0.05em 0.3em;
+  border-radius: 4px;
+  background: var(--hmi-bg-deep);
 }
 
 .ask-card {
-  background: var(--assistant-bg);
-  border: 1px solid var(--accent-dim);
-  border-radius: 10px;
+  background: var(--hmi-surface);
+  border: 1px solid var(--hmi-accent-line);
+  border-radius: var(--hmi-radius);
   padding: 0.75rem 0.9rem;
   display: flex;
   flex-direction: column;
@@ -923,16 +1100,15 @@ onMounted(async () => {
 }
 
 .ask-title {
-  margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--hmi-fs-3);
   font-weight: 600;
-  color: var(--accent);
+  color: var(--hmi-accent);
 }
 
 .ask-hint {
-  margin: -0.35rem 0 0;
-  font-size: 0.7rem;
-  color: var(--muted);
+  margin-block-start: -0.35rem;
+  font-size: var(--hmi-fs-1);
+  color: var(--hmi-text-3);
 }
 
 .ask-item {
@@ -942,40 +1118,49 @@ onMounted(async () => {
 }
 
 .ask-q {
-  margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--hmi-fs-3);
 }
 
 .opt-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.35rem;
 }
 
 .opt-chip {
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid var(--hmi-line);
   border-radius: 999px;
-  color: var(--text);
-  font-size: 0.75rem;
-  padding: 0.3rem 0.75rem;
+  color: var(--hmi-text-2);
+  font-size: var(--hmi-fs-2);
+  padding: 0.3rem 0.7rem;
+  min-block-size: 32px;
   cursor: pointer;
 }
 
 .opt-chip.active {
-  border-color: var(--accent);
-  background: rgba(45, 212, 168, 0.16);
-  color: var(--accent);
+  border-color: var(--hmi-accent);
+  background: var(--hmi-accent-soft);
+  color: var(--hmi-accent);
 }
 
 .diag-card {
-  background: var(--surface);
-  border: 1px solid;
-  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.022), transparent 50%), var(--hmi-surface);
+  border: 1px solid var(--hmi-line);
+  border-inline-start: 3px solid var(--hmi-warn);
+  border-radius: var(--hmi-radius);
   padding: 0.8rem 0.95rem;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+}
+
+.diag-card[data-severity='red'] {
+  border-inline-start-color: var(--hmi-danger);
+}
+
+.diag-card[data-severity='green'] {
+  border-inline-start-color: var(--hmi-ok);
 }
 
 .diag-head {
@@ -984,38 +1169,34 @@ onMounted(async () => {
   gap: 0.45rem;
 }
 
-.diag-icon {
-  font-size: 1rem;
-}
-
-.diag-label {
-  font-size: 0.85rem;
-  font-weight: 700;
+.diag-title {
+  font-size: var(--hmi-fs-1);
+  color: var(--hmi-text-3);
+  letter-spacing: 0.04em;
 }
 
 .diag-summary {
-  margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--hmi-fs-4);
   font-weight: 600;
 }
 
 .diag-sec {
-  font-size: 0.78rem;
+  font-size: var(--hmi-fs-2);
 }
 
 .diag-sec ul,
 .diag-sec ol {
   margin: 0.25rem 0 0;
-  padding-left: 1.2rem;
+  padding-inline-start: 1.2rem;
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  color: var(--hmi-text-2);
 }
 
 .sec-title {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.72rem;
+  color: var(--hmi-text-3);
+  font-size: var(--hmi-fs-1);
   font-weight: 600;
 }
 
@@ -1026,34 +1207,110 @@ onMounted(async () => {
 .composer {
   display: flex;
   align-items: flex-end;
-  gap: 0.6rem;
-  padding: 0.75rem 1rem;
-  /* iPhone 底部横条不压住输入栏（viewport-fit=cover 生效前提） */
-  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border);
-  background: var(--surface);
+  gap: 0.5rem;
+  padding: 0.65rem clamp(0.7rem, 2vw, 1.2rem);
+  padding-block-end: calc(0.65rem + env(safe-area-inset-bottom, 0px));
+  border-block-start: 1px solid var(--hmi-line);
+  background: rgba(11, 18, 23, 0.82);
+}
+
+.composer-input {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.composer-hint {
+  color: var(--hmi-text-3);
+  font-size: 0.62rem;
+  padding-inline-start: 2px;
+}
+
+.context-pane {
+  inline-size: 274px;
+  flex: none;
+  overflow-y: auto;
+  padding: 0.8rem 0.7rem 0.8rem 0;
 }
 
 .mobile-only {
   display: none;
 }
 
-@media (max-width: 768px) {
-  .sidebar {
+.drawer-list {
+  margin-block-start: 0.7rem;
+}
+
+.book-tip {
+  color: var(--hmi-text-3);
+  font-size: var(--hmi-fs-2);
+  margin: 0.4rem 0 0;
+}
+
+@media (max-width: 1180px) {
+  .context-pane {
     display: none;
+  }
+
+  .chat-head .mobile-only:last-child {
+    display: inline-flex;
+    margin-inline-start: auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .session-pane {
+    display: none;
+  }
+
+  .chat-page {
+    block-size: calc(100vh - var(--hmi-topbar-h) - var(--hmi-tabbar-h));
+    block-size: calc(100dvh - var(--hmi-topbar-h) - var(--hmi-tabbar-h));
   }
 
   .mobile-only {
     display: inline-flex;
   }
 
-  .desktop-only {
-    display: none;
+  .head-meta {
+    margin-inline-start: auto;
   }
 
   .bubble-row.user,
   .assistant-block {
-    max-width: 94%;
+    max-inline-size: 94%;
+  }
+
+  .composer-hint {
+    display: none;
+  }
+
+  .send-btn {
+    padding-inline: 0.85rem;
+  }
+
+  .msg-list {
+    padding-block-end: 0.6rem;
+  }
+}
+
+@media (max-width: 520px) {
+  .send-btn :deep(span) {
+    display: none;
+  }
+
+  .send-btn {
+    padding-inline: 0.7rem;
+  }
+
+  .chat-head {
+    padding-inline: 0.6rem;
+  }
+
+  .head-meta {
+    display: none;
   }
 }
 </style>

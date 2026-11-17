@@ -1,7 +1,7 @@
 """上下文压缩（AstrBot 双阀门）。
 
 阀门 1 轮数截断：超过 max_rounds 轮的最早轮次不进模型上下文。
-阀门 2 token 阈值：估算超预算 → 压缩模型把更早轮次摘要成"前情摘要"（独立槽位 Key）。
+阀门 2 token 阈值：估算超预算 → 压缩模型把更早轮次摘要成"前情摘要"（主模型 + aux key）。
 
 参数（compress_max_rounds / compress_token_budget / compress_min_keep_rounds /
 summary_max_chars）实时读 config.json agent 节（superadmin 后台在线可调，
@@ -20,7 +20,7 @@ import logging
 from sqlalchemy.orm import Session as DbSession
 
 from backend.config import agent_param
-from backend.core.providers.llm import get_background_provider, provider_label
+from backend.core.providers.llm import get_aux_provider, provider_label
 from backend.db.models import Session as ChatSession
 
 logger = logging.getLogger(__name__)
@@ -71,8 +71,8 @@ def _old_text(old: list[dict], prev_summary: str) -> str:
 
 
 async def _summarize(old: list[dict], prev_summary: str, db: DbSession, session: ChatSession) -> str | None:
-    """调后台压缩槽位生成摘要；失败返回 None（调用方降级为纯截断）。usage 落账 slot=compression。"""
-    provider = get_background_provider()
+    """调辅助任务槽位生成摘要；失败返回 None（调用方降级为纯截断）。usage 落账 slot=compression。"""
+    provider = get_aux_provider()
     if not provider.api_key:
         return None
     max_chars = int(agent_param("summary_max_chars"))

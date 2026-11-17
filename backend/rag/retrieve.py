@@ -106,7 +106,7 @@ def search(
             KbDocument.title,
         )
         .join(KbDocument, KbChunk.document_id == KbDocument.id)
-        .where(KbChunk.id.in_(ids))
+        .where(KbChunk.id.in_(ids), KbDocument.status == "ready")
     ).all()
     by_id = {int(r[0]): r for r in rows}
 

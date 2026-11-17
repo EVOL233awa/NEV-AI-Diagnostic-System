@@ -4,17 +4,19 @@
 staff001/staff001、user001/user001。config.json 的 seed_admin 节仅作记录，
 不再存随机密码（公开仓库零明文）。
 
-superadmin 调试账号（2026-09-29 用户裁定，启动脚本 = 最小化 cmd 窗口跑 main.py）：
-密码 20 位随机字母数字，明文存服务器本机 data/config.json 的 superadmin 节
-（与 API Key 同一密钥宿主，不进仓库/DB/任何接口响应/日志）；
-**每次启动进程都打印到后端 stdout**（即启动脚本弹出的 cmd 窗口，点开即看）。
-公网环境下面板 /superadmin 仅此角色可进，admin 成员管理对其不可见。
+superadmin 账号（v2.1.0 固定密码口径，代码不内置默认值）：
+密码来源优先级：环境变量 NEV_SUPERADMIN_PASSWORD > config.json superadmin.password
+> 首次启动生成一次性随机值（标记 generated，提示尽快固定）。
+`python main.py --set-superadmin-password <value>` 写入 config 与 DB 哈希后退出。
+明文只存服务器本机 data/config.json 的 superadmin 节（不进仓库/DB/接口响应），
+每次启动打印到后端 stdout，并标注来源（env/config/generated）。
 
 另含演示车辆档案：user001 名下绑定一台默认车，
 供车辆档案归档与历史诊断跨会话测试。
 """
 from __future__ import annotations
 
+import os
 import secrets
 import string
 
@@ -33,6 +35,13 @@ BUILTIN_ACCOUNTS: list[tuple[str, str, str]] = [
 SUPERADMIN_USERNAME = "superadmin"
 SUPERADMIN_DISPLAY_NAME = "超级管理员"
 SUPERADMIN_PASSWORD_LEN = 20  # 字母数字 20 位 ≈ 119 bit 熵，公网环境抗爆破
+SUPERADMIN_ENV_VAR = "NEV_SUPERADMIN_PASSWORD"
+
+SOURCE_LABELS = {
+    "env": "环境变量 NEV_SUPERADMIN_PASSWORD",
+    "config": "本机 data/config.json（固定值）",
+    "generated": "首次启动随机生成（一次性，建议尽快固定）",
+}
 
 # 演示车（仅 user001）：无则创建
 DEMO_VEHICLE = {
@@ -56,45 +65,50 @@ def _stored_superadmin_password() -> str:
     return str(settings.raw.get("superadmin", {}).get("password") or "")
 
 
-def _store_superadmin_password(password: str) -> None:
-    settings.raw["superadmin"] = {"password": password}
+def _stored_password_source() -> str:
+    source = str(settings.raw.get("superadmin", {}).get("password_source") or "").strip()
+    return source if source in ("env", "config", "generated") else ""
+
+
+def _store_superadmin_password(password: str, source: str) -> None:
+    settings.raw["superadmin"] = {"password": password, "password_source": source}
     save_raw(settings.raw)
 
 
-def _print_superadmin_password(password: str, created: bool) -> None:
-    header = "超级管理员账号已创建" if created else "超级管理员账号"
+def _validate_or_exit(password: str) -> None:
+    """env/CLI 指定的密码必须过强度校验；不通过拒绝启动，不静默降级。"""
+    from fastapi import HTTPException
+
+    from backend.api.auth import ensure_password_strength
+
+    try:
+        ensure_password_strength(password, SUPERADMIN_USERNAME)
+    except HTTPException as exc:
+        print(f"[seed] superadmin 密码不符合要求：{exc.detail}")
+        raise SystemExit(1) from exc
+
+
+def _print_superadmin_password(password: str, source: str) -> None:
     print()
     print("=" * 64)
-    print(f"  [{header}] 本窗口可见，请勿转发/截图外传")
+    print("  [超级管理员账号] 本窗口可见，请勿转发/截图外传")
     print(f"  账号：{SUPERADMIN_USERNAME}")
-    print(f"  密码：{password}")
-    print("  （明文仅存服务器本机 data/config.json；重新生成请运行：")
-    print("   python main.py --reset-superadmin）")
+    if source == "generated":
+        # 仅一次性生成时输出明文，便于首次登录；之后从 config 读取不再回显到日志
+        print(f"  密码：{password}")
+    else:
+        print("  密码：（来自环境变量/配置文件，出于安全不在日志显示）")
+    print(f"  来源：{SOURCE_LABELS.get(source, source)}")
+    if source == "generated":
+        print("  （建议部署时用 --set-superadmin-password 或环境变量固定，避免误以为会变）")
+    elif source == "env":
+        print("  （环境变量优先于面板修改：改面板密码后重启会被 env 覆盖）")
     print("=" * 64)
     print()
 
 
-def _announce_superadmin(user: User) -> None:
-    """每次启动打印 superadmin 凭据（2026-09-29 用户裁定：启动即见，点开最小化窗口可查）。
-
-    config 明文与 DB 哈希不一致（手动改过其中一边）时只告警不改数据，恢复通道走 reset。
-    """
-    stored = _stored_superadmin_password()
-    if stored and verify_password(stored, user.password_hash):
-        _print_superadmin_password(stored, created=False)
-    elif not stored:
-        print("[seed] superadmin 账号已存在但明文密码未记录，"
-              "运行 python main.py --reset-superadmin 重新生成")
-    else:
-        print("[seed] config.json 的 superadmin.password 与登录凭据不一致（可能被手动修改），"
-              "登录以数据库为准；忘记密码请运行 python main.py --reset-superadmin")
-
-
-def reset_superadmin_password() -> str:
-    """重新随机生成 superadmin 密码：旧密码立即作废，明文经返回值交给调用方打印。
-
-    同步更新 DB 哈希与 config.json 明文（下次启动照常打印）。账号不存在则顺带创建。
-    """
+def _sync_superadmin_password(password: str, source: str, *, audit_action: str) -> None:
+    """同步 DB 哈希 + config 明文；账号不存在则创建。"""
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == SUPERADMIN_USERNAME).first()
@@ -109,18 +123,52 @@ def reset_superadmin_password() -> str:
             db.flush()
             db.add(AuditLog(user_id=user.id, action="seed_account_created",
                             detail={"username": SUPERADMIN_USERNAME, "role": "superadmin"}, ip=""))
-        password = generate_superadmin_password()
         user.password_hash = hash_password(password)
-        user.disabled = False  # 重置即解锁：这是管理员被锁在门外时的恢复通道
-        db.add(AuditLog(user_id=user.id, action="superadmin_password_reset", detail={}, ip=""))
+        user.disabled = False  # 固定/重置即解锁：这是管理员被锁在门外时的恢复通道
+        db.add(AuditLog(user_id=user.id, action=audit_action, detail={"source": source}, ip=""))
         db.commit()
-        _store_superadmin_password(password)
-        return password
     finally:
         db.close()
+    _store_superadmin_password(password, source)
 
 
-def ensure_seed() -> None:
+def apply_superadmin_password(env_password: str | None = None) -> tuple[str, str]:
+    """按优先级解析 superadmin 密码并同步落库：env > config > 一次性生成。"""
+    if env_password is None:
+        env_password = os.environ.get(SUPERADMIN_ENV_VAR, "")
+    env_password = (env_password or "").strip()
+    stored = _stored_superadmin_password()
+    source = _stored_password_source()
+
+    if env_password:
+        _validate_or_exit(env_password)
+        if stored != env_password or source != "env":
+            _sync_superadmin_password(env_password, "env", audit_action="superadmin_password_env_sync")
+        return env_password, "env"
+
+    if stored:
+        # config 里有值：沿用；来源缺失（旧配置）按 config 记，generated 保留警示
+        if source not in ("config", "generated"):
+            _store_superadmin_password(stored, "config")
+            source = "config"
+        return stored, source
+
+    password = generate_superadmin_password()
+    _sync_superadmin_password(password, "generated", audit_action="superadmin_password_generated")
+    return password, "generated"
+
+
+def reset_superadmin_password() -> str:
+    """按优先级重新应用 superadmin 密码（--reset-superadmin / 测试夹具入口）。
+
+    语义（v2.1.0）：env 优先；否则沿用 config 固定值；都没有才生成一次性随机值。
+    返回最终生效的密码。
+    """
+    password, _source = apply_superadmin_password()
+    return password
+
+
+def ensure_seed(superadmin_override: str | None = None) -> None:
     db = SessionLocal()
     try:
         # 遗留迁移：手机号时期的唯一管理员（username 被回填成手机号）→ 改为 admin
@@ -160,35 +208,21 @@ def ensure_seed() -> None:
                 raw["seed_admin"] = {"username": "admin", "password": "admin"}
                 save_raw(raw)
             print(f"[seed] 已创建内置账号 {'、'.join(created)}（初始密码 = 账号名）")
+    finally:
+        db.close()
 
-        # superadmin 调试账号：不存在则创建（明文同步入 config.json）；
-        # 已存在则每次启动照常打印凭据（启动脚本的最小化 cmd 窗口即查看入口）
-        superadmin = db.query(User).filter(User.username == SUPERADMIN_USERNAME).first()
-        if superadmin is None:
-            password = generate_superadmin_password()
-            user = User(
-                username=SUPERADMIN_USERNAME,
-                password_hash=hash_password(password),
-                role="superadmin",
-                display_name=SUPERADMIN_DISPLAY_NAME,
-            )
-            db.add(user)
-            db.flush()
-            db.add(
-                AuditLog(
-                    user_id=user.id,
-                    action="seed_account_created",
-                    detail={"username": SUPERADMIN_USERNAME, "role": "superadmin"},
-                    ip="",
-                )
-            )
-            db.commit()
-            _store_superadmin_password(password)
-            _print_superadmin_password(password, created=True)
-        else:
-            _announce_superadmin(superadmin)
+    # superadmin：固定密码流程（CLI 覆盖 > env > config > 一次性生成），每次启动打印
+    if superadmin_override:
+        _validate_or_exit(superadmin_override)
+        _sync_superadmin_password(superadmin_override, "config", audit_action="superadmin_password_set")
+        _print_superadmin_password(superadmin_override, "config")
+    else:
+        password, source = apply_superadmin_password()
+        _print_superadmin_password(password, source)
 
-        # 演示车辆档案绑定（幂等：按 VIN 查重）
+    # 演示车辆档案绑定（幂等：按 VIN 查重）
+    db = SessionLocal()
+    try:
         owner = db.query(User).filter(User.username == "user001").first()
         if owner is not None:
             vehicle = (

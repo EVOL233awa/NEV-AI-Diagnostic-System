@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { titleForPath } from '../config/navigation'
 import { auth } from '../stores/auth'
 
 const router = createRouter({
@@ -52,6 +53,12 @@ const router = createRouter({
       meta: { roles: ['staff', 'admin'] },
     },
     {
+      path: '/staff/dtc',
+      name: 'staff-dtc',
+      component: () => import('../views/StaffDtcView.vue'),
+      meta: { roles: ['staff', 'admin'] },
+    },
+    {
       path: '/cases',
       name: 'cases',
       component: () => import('../views/CasesView.vue'),
@@ -82,6 +89,12 @@ const router = createRouter({
       component: () => import('../views/AdminAuditView.vue'),
       meta: { roles: ['admin'] },
     },
+    {
+      path: '/admin/diagnosis',
+      name: 'admin-diagnosis',
+      component: () => import('../views/AdminDiagnosisView.vue'),
+      meta: { roles: ['admin'] },
+    },
     // 调试后台（superadmin 专属：供应商/Agent 参数在线配置）
     {
       path: '/superadmin',
@@ -94,7 +107,7 @@ const router = createRouter({
       path: '/report/appointment/:id',
       name: 'appointment-report',
       component: () => import('../views/ReportView.vue'),
-      meta: { roles: ['staff', 'admin'] },
+      meta: { roles: ['staff', 'admin'], standalone: true },
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
@@ -112,6 +125,10 @@ router.beforeEach((to) => {
     return { name: 'home' }
   }
   return true
+})
+
+router.afterEach((to) => {
+  document.title = `${titleForPath(to.path)} · 新能源汽车 AI 智能诊断系统`
 })
 
 export { router }

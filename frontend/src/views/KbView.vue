@@ -12,9 +12,13 @@ import {
   type KbDocumentInfo,
   type KbSearchHit,
 } from '../api/client'
-import BackHome from '../components/BackHome.vue'
+import EmptyState from '../components/EmptyState.vue'
+import PageHeader from '../components/layout/PageHeader.vue'
+import StatusChip from '../components/StatusChip.vue'
 
 const docs = ref<KbDocumentInfo[]>([])
+const docQuery = ref('')
+const tab = ref<'preview' | 'upload' | 'search'>('preview')
 
 const uploadForm = reactive({
   title: '',
@@ -34,7 +38,6 @@ const hits = ref<KbSearchHit[]>([])
 
 const CATEGORIES = ['general', 'dtc', 'battery', 'motor', 'electric_control', 'charging', 'method', 'scenario', 'indicators', 'maintenance', 'case']
 
-/** 类别码 → 中文标签（下拉里不再显示裸英文码） */
 const CAT_LABELS: Record<string, string> = {
   general: '通用知识',
   dtc: '故障码',
@@ -53,50 +56,35 @@ function catLabel(c: string): string {
   return CAT_LABELS[c] ?? c
 }
 
-/* ---------- 文档预览：来源 → 模块 → 文章 三级筛选，分片可展开 + 整篇预览 ---------- */
+const filteredDocs = computed(() => {
+  const q = docQuery.value.trim().toLowerCase()
+  const sorted = [...docs.value].sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'))
+  if (!q) return sorted
+  return sorted.filter((doc) => [doc.title, doc.category, doc.source_note].join(' ').toLowerCase().includes(q))
+})
 
-const previewSource = ref<'kb' | 'case'>('kb')
-const previewCategory = ref('')
+/* ---------- 文档预览 ---------- */
+
 const previewDocId = ref<number | null>(null)
 const previewChunks = ref<KbChunkInfo[]>([])
 const previewLoading = ref(false)
 const expandedChunks = ref<number[]>([])
 
-const sourceDocs = computed(() =>
-  docs.value.filter((d) => (previewSource.value === 'case' ? d.category === 'case' : d.category !== 'case')),
-)
-const moduleOptions = computed(() => [...new Set(sourceDocs.value.map((d) => d.category))])
-const articleOptions = computed(() =>
-  previewSource.value === 'kb' && previewCategory.value
-    ? sourceDocs.value.filter((d) => d.category === previewCategory.value)
-    : sourceDocs.value,
-)
-const previewDoc = computed(() => sourceDocs.value.find((d) => d.id === previewDocId.value) ?? null)
+const previewDoc = computed(() => docs.value.find((d) => d.id === previewDocId.value) ?? null)
 const fullText = computed(() => previewChunks.value.map((c) => c.content).join('\n\n'))
 
-function selectDoc(id: number | null): void {
-  previewDocId.value = id
+function selectDoc(doc: KbDocumentInfo): void {
+  previewDocId.value = doc.id
   previewChunks.value = []
   expandedChunks.value = []
-  if (id !== null) void loadChunks(id)
-}
-
-function onSourceChange(): void {
-  previewCategory.value = ''
-  selectDoc(null)
-}
-
-function onCategoryChange(): void {
-  selectDoc(null)
+  tab.value = 'preview'
+  void loadChunks(doc.id)
 }
 
 async function loadChunks(id: number): Promise<void> {
   previewLoading.value = true
   try {
     previewChunks.value = await listKbChunks(id)
-    if (previewChunks.value.length === 0) {
-      ElMessage.info('该文档暂无分片（可能解析失败）')
-    }
   } catch {
     ElMessage.error('加载分片失败')
   } finally {
@@ -141,6 +129,8 @@ async function doUpload(): Promise<void> {
     uploadForm.file = null
     if (fileInput.value) fileInput.value.value = ''
     await refresh()
+    const created = docs.value.find((doc) => doc.id === resp.id)
+    if (created) selectDoc(created)
   } catch {
     ElMessage.error('入库失败：检查文件类型或联系管理员')
   } finally {
@@ -149,10 +139,17 @@ async function doUpload(): Promise<void> {
 }
 
 async function doDelete(doc: KbDocumentInfo): Promise<void> {
-  await ElMessageBox.confirm(`删除「${doc.title}」及其 ${doc.chunk_count} 个知识块？`, '确认删除', { type: 'warning' })
+  try {
+    await ElMessageBox.confirm(`删除「${doc.title}」及其 ${doc.chunk_count} 个知识块？`, '确认删除', { type: 'warning' })
+  } catch {
+    return
+  }
   await deleteKbDocument(doc.id)
   ElMessage.success('已删除')
-  if (previewDocId.value === doc.id) selectDoc(null)
+  if (previewDocId.value === doc.id) {
+    previewDocId.value = null
+    previewChunks.value = []
+  }
   await refresh()
 }
 
@@ -161,210 +158,319 @@ async function doSearch(): Promise<void> {
   searching.value = true
   try {
     hits.value = await kbSearch(searchForm.query.trim(), searchForm.category || null, searchForm.topK)
-    if (hits.value.length === 0) {
-      ElMessage.info('无命中结果')
-    }
+    if (hits.value.length === 0) ElMessage.info('无命中结果')
   } finally {
     searching.value = false
   }
+}
+
+function statusTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
+  if (status === 'ready' || status === 'ok') return 'ok'
+  if (status === 'parsing') return 'warn'
+  if (status === 'failed') return 'danger'
+  return 'neutral'
 }
 
 onMounted(refresh)
 </script>
 
 <template>
-  <div class="kb-page">
-    <header class="topbar">
-      <BackHome />
-      <div class="brand">
-        <h1>知识库管理</h1>
-        <p class="subtitle">上传文档 · 文档预览 · 检索测试台</p>
-      </div>
-    </header>
+  <div class="page">
+    <PageHeader title="知识库管理" subtitle="上传、分片预览与检索测试；检索结果会带章节路径与来源">
+      <template #actions>
+        <StatusChip :label="`${docs.length} 篇文档`" tone="neutral" />
+        <el-button type="primary" :icon="Upload" @click="tab = 'upload'">上传文档</el-button>
+      </template>
+    </PageHeader>
 
-    <main class="content">
-      <section class="card">
-        <h2>检索测试台</h2>
-        <div class="search-row">
-          <el-input
-            v-model="searchForm.query"
-            class="query-input"
-            placeholder="输入查询，例如：冬天续航掉得厉害 / P0A7F"
-            clearable
-            @keyup.enter="doSearch"
-          />
-          <el-select v-model="searchForm.category" placeholder="全部类别" clearable class="cat-select">
-            <el-option v-for="c in CATEGORIES" :key="c" :label="catLabel(c)" :value="c" />
-          </el-select>
-          <div class="topk">
-            <span class="topk-label">返回条数</span>
-            <el-select v-model="searchForm.topK" class="topk-select">
-              <el-option v-for="n in TOP_K_OPTIONS" :key="n" :label="`${n} 条`" :value="n" />
-            </el-select>
-          </div>
-          <el-button type="primary" :icon="Search" :loading="searching" @click="doSearch">检索</el-button>
+    <div class="kb-layout">
+      <aside class="doc-pane hmi-card">
+        <div class="pane-head">
+          <h3>文档清单</h3>
+          <span class="hmi-sub">{{ filteredDocs.length }} / {{ docs.length }}</span>
         </div>
-        <div v-if="hits.length" class="hits">
-          <div v-for="h in hits" :key="h.chunk_id" class="hit">
-            <div class="hit-head">
-              <span class="hit-doc">{{ h.document }}</span>
-              <span class="hit-sec">{{ h.section }}</span>
-              <span class="hit-meta">score {{ h.score.toFixed(4) }} · {{ h.legs.join('+') }}</span>
-            </div>
-            <p class="hit-content">{{ h.content }}</p>
-          </div>
+        <el-input v-model="docQuery" placeholder="搜索标题 / 类别 / 来源" clearable size="small" class="doc-search" aria-label="搜索知识库文档" />
+        <div class="doc-list">
+          <button
+            v-for="doc in filteredDocs"
+            :key="doc.id"
+            type="button"
+            class="doc-item"
+            :class="{ active: previewDocId === doc.id }"
+            :aria-current="previewDocId === doc.id ? 'true' : undefined"
+            @click="selectDoc(doc)"
+          >
+            <span class="doc-title">{{ doc.title }}</span>
+            <span class="doc-meta">
+              <span>{{ catLabel(doc.category) }}</span>
+              <span class="hmi-mono">{{ doc.chunk_count }} 块</span>
+            </span>
+            <span class="doc-status">
+              <StatusChip :label="doc.status" :tone="statusTone(doc.status)" />
+            </span>
+          </button>
+          <EmptyState v-if="filteredDocs.length === 0" title="没有匹配文档" compact />
         </div>
-      </section>
+      </aside>
 
-      <section id="doc-preview" class="card">
-        <h2>文档预览</h2>
-        <div class="preview-filters">
-          <div class="filter-field">
-            <span class="filter-label">分类</span>
-            <el-select v-model="previewSource" class="filter-select" @change="onSourceChange">
-              <el-option label="知识库" value="kb" />
-              <el-option label="沉淀案例" value="case" />
-            </el-select>
-          </div>
-          <div v-if="previewSource === 'kb'" class="filter-field">
-            <span class="filter-label">模块</span>
-            <el-select v-model="previewCategory" placeholder="全部模块" clearable class="filter-select" @change="onCategoryChange">
-              <!-- 显式复位入口：触屏设备无 hover，clearable 清除按钮不可达 -->
-              <el-option label="全部模块" value="" />
-              <el-option v-for="c in moduleOptions" :key="c" :label="catLabel(c)" :value="c" />
-            </el-select>
-          </div>
-          <div class="filter-field article-field">
-            <span class="filter-label">文章</span>
-            <el-select
-              :model-value="previewDocId"
-              placeholder="选择文章后可预览"
-              class="filter-select"
-              :loading="previewLoading"
-              @change="(v: number | null) => selectDoc(v ?? null)"
-            >
-              <el-option v-for="d in articleOptions" :key="d.id" :label="`${d.title}（${d.chunk_count} 块）`" :value="d.id" />
-            </el-select>
-          </div>
-        </div>
+      <section class="work-pane hmi-card">
+        <el-tabs v-model="tab">
+          <el-tab-pane label="文档预览" name="preview">
+            <template v-if="previewDoc">
+              <div class="preview-head">
+                <div>
+                  <h3>{{ previewDoc.title }}</h3>
+                  <p class="hmi-sub">
+                    {{ catLabel(previewDoc.category) }} · {{ previewDoc.chunk_count }} 块 · 状态 {{ previewDoc.status }}
+                    <span v-if="previewDoc.source_note"> · 来源：{{ previewDoc.source_note }}</span>
+                  </p>
+                </div>
+                <el-button type="danger" plain size="small" @click="doDelete(previewDoc)">删除</el-button>
+              </div>
 
-        <template v-if="previewDoc">
-          <div class="doc-meta-row">
-            <p class="doc-meta">
-              {{ catLabel(previewDoc.category) }} · {{ previewDoc.chunk_count }} 块 ·
-              状态 {{ previewDoc.status }}<span v-if="previewDoc.source_note"> · 来源：{{ previewDoc.source_note }}</span>
-            </p>
-            <el-button class="doc-delete" link type="danger" size="small" @click="doDelete(previewDoc)">删除</el-button>
-          </div>
+              <h4 class="sub-title">分片预览 <span class="hmi-sub">（点开查看原文块）</span></h4>
+              <div v-loading="previewLoading">
+                <el-collapse v-if="previewChunks.length" v-model="expandedChunks" class="chunk-collapse">
+                  <el-collapse-item v-for="chunk in previewChunks" :key="chunk.id" :name="chunk.id">
+                    <template #title>
+                      <span class="chunk-title hmi-mono">
+                        #{{ chunk.seq }} · {{ chunk.section_path || '（无章节）' }}<span v-if="chunk.page_no"> · P{{ chunk.page_no }}</span>
+                      </span>
+                    </template>
+                    <p class="chunk-content">{{ chunk.content }}</p>
+                  </el-collapse-item>
+                </el-collapse>
+                <EmptyState v-else-if="!previewLoading" title="暂无分片" description="可能解析失败或文档为空。" compact />
+              </div>
 
-          <h3 class="preview-sub">分片预览<span class="preview-hint">（点开查看原文块）</span></h3>
-          <div v-loading="previewLoading">
-            <el-collapse v-if="previewChunks.length" v-model="expandedChunks" class="chunk-collapse">
-              <el-collapse-item v-for="c in previewChunks" :key="c.id" :name="c.id">
-                <template #title>
-                  <span class="chunk-title">
-                    #{{ c.seq }} · {{ c.section_path || '（无章节）' }}<span v-if="c.page_no"> · P{{ c.page_no }}</span>
-                  </span>
-                </template>
-                <p class="chunk-content">{{ c.content }}</p>
-              </el-collapse-item>
-            </el-collapse>
-            <p v-else-if="!previewLoading" class="muted">暂无分片</p>
-          </div>
-
-          <h3 class="preview-sub">整篇预览</h3>
-          <div class="full-text">{{ fullText }}</div>
-        </template>
-        <p v-else class="muted">先选分类，再从文章下拉里挑一篇即可在下方阅读。</p>
-      </section>
-
-      <section class="card">
-        <h2>上传新文档</h2>
-        <el-form label-width="90px">
-          <el-form-item label="文件">
-            <div class="upload-row">
-              <input ref="fileInput" type="file" accept=".pdf,.docx,.md,.markdown,.txt,.csv,.json" @change="onFileChange" />
-              <span class="hint">支持 PDF / Word / MD / TXT / CSV / JSON</span>
-            </div>
-          </el-form-item>
-          <el-form-item label="或文本">
-            <el-input
-              v-model="uploadForm.markdown_text"
-              type="textarea"
-              :rows="5"
-              placeholder="直接粘贴 Markdown 文本（# 标题结构会被识别为章节路径）"
+              <h4 class="sub-title">整篇预览</h4>
+              <div class="full-text">{{ fullText || '（无内容）' }}</div>
+            </template>
+            <EmptyState
+              v-else
+              title="从左侧选择一篇文档"
+              description="可查看分片章节、来源与整篇内容；也可在「检索测试」里验证召回效果。"
             />
-          </el-form-item>
-          <el-form-item label="标题">
-            <el-input v-model="uploadForm.title" placeholder="留空自动取文件名" />
-          </el-form-item>
-          <el-form-item label="类别">
-            <el-select v-model="uploadForm.category" style="width: 200px">
-              <el-option v-for="c in CATEGORIES" :key="c" :label="catLabel(c)" :value="c" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="来源说明">
-            <div class="upload-row">
-              <el-input v-model="uploadForm.source_url" placeholder="来源 URL（可选）" style="flex: 1" />
-              <el-input v-model="uploadForm.source_note" placeholder="来源说明（可溯源要求）" style="flex: 1" />
+          </el-tab-pane>
+
+          <el-tab-pane label="上传文档" name="upload">
+            <el-form label-position="top">
+              <div class="form-grid">
+                <el-form-item label="文件">
+                  <input ref="fileInput" type="file" accept=".pdf,.docx,.md,.markdown,.txt,.csv,.json" @change="onFileChange" />
+                  <span class="hint">支持 PDF / Word / MD / TXT / CSV / JSON</span>
+                </el-form-item>
+                <el-form-item label="类别">
+                  <el-select v-model="uploadForm.category">
+                    <el-option v-for="c in CATEGORIES" :key="c" :label="catLabel(c)" :value="c" />
+                  </el-select>
+                </el-form-item>
+              </div>
+              <el-form-item label="标题">
+                <el-input v-model="uploadForm.title" placeholder="留空自动取文件名" />
+              </el-form-item>
+              <el-form-item label="或粘贴 Markdown">
+                <el-input
+                  v-model="uploadForm.markdown_text"
+                  type="textarea"
+                  :rows="7"
+                  placeholder="直接粘贴 Markdown 文本（# 标题结构会被识别为章节路径）"
+                />
+              </el-form-item>
+              <div class="form-grid">
+                <el-form-item label="来源 URL">
+                  <el-input v-model="uploadForm.source_url" placeholder="可选" />
+                </el-form-item>
+                <el-form-item label="来源说明">
+                  <el-input v-model="uploadForm.source_note" placeholder="可溯源要求" />
+                </el-form-item>
+              </div>
+              <el-button type="primary" :icon="Upload" :loading="uploading" @click="doUpload">解析入库</el-button>
+            </el-form>
+          </el-tab-pane>
+
+          <el-tab-pane label="检索测试" name="search">
+            <div class="search-row">
+              <el-input
+                v-model="searchForm.query"
+                class="query-input"
+                placeholder="输入查询，例如：冬天续航掉得厉害 / P0A7F"
+                clearable
+                aria-label="检索测试查询"
+                @keyup.enter="doSearch"
+              />
+              <el-select v-model="searchForm.category" placeholder="全部类别" clearable class="cat-select" aria-label="按类别筛选">
+                <el-option v-for="c in CATEGORIES" :key="c" :label="catLabel(c)" :value="c" />
+              </el-select>
+              <el-select v-model="searchForm.topK" class="topk-select" aria-label="返回条数">
+                <el-option v-for="n in TOP_K_OPTIONS" :key="n" :label="`${n} 条`" :value="n" />
+              </el-select>
+              <el-button type="primary" :icon="Search" :loading="searching" @click="doSearch">检索</el-button>
             </div>
-          </el-form-item>
-          <el-button type="primary" :icon="Upload" :loading="uploading" @click="doUpload">解析入库</el-button>
-        </el-form>
+            <div v-if="hits.length" class="hits">
+              <article v-for="hit in hits" :key="hit.chunk_id" class="hit">
+                <header class="hit-head">
+                  <span class="hit-doc">{{ hit.document }}</span>
+                  <span class="hit-sec">{{ hit.section }}</span>
+                  <span class="hit-meta hmi-mono">score {{ hit.score.toFixed(4) }} · {{ hit.legs.join('+') }}</span>
+                </header>
+                <p class="hit-content">{{ hit.content }}</p>
+              </article>
+            </div>
+            <EmptyState v-else title="检索测试台" description="输入车主口语或故障码，验证 BM25 / 向量 / 重排的召回与分数。" compact />
+          </el-tab-pane>
+        </el-tabs>
       </section>
-    </main>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.kb-page {
-  min-height: 100vh;
+.kb-layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
 }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.brand h1 {
-  font-size: 1.05rem;
-  margin: 0;
-}
-
-.subtitle {
-  color: var(--muted);
-  font-size: 0.72rem;
-  margin: 0.25rem 0 0;
-}
-
-.content {
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 1.25rem;
+.doc-pane {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.5rem;
+  padding: 0.85rem 0.85rem 0.5rem;
+  max-block-size: calc(100vh - var(--hmi-topbar-h) - 8rem);
+  max-block-size: calc(100dvh - var(--hmi-topbar-h) - 8rem);
+  position: sticky;
+  inset-block-start: calc(var(--hmi-topbar-h) + 0.75rem);
 }
 
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
+.pane-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
 }
 
-.card h2 {
-  font-size: 0.95rem;
-  margin: 0 0 0.75rem;
+.pane-head h3 {
+  font-size: var(--hmi-fs-4);
+  font-weight: 650;
 }
 
-.card h3 {
-  font-size: 0.85rem;
-  margin: 0.9rem 0 0.5rem;
+.doc-search {
+  margin-block-end: 0.1rem;
+}
+
+.doc-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-block-end: 0.3rem;
+}
+
+.doc-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'title status'
+    'meta status';
+  gap: 1px 0.4rem;
+  inline-size: 100%;
+  text-align: start;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--hmi-radius-sm);
+  padding: 0.45rem 0.5rem;
+  color: var(--hmi-text-2);
+  cursor: pointer;
+}
+
+.doc-item:hover {
+  background: var(--hmi-surface-2);
+}
+
+.doc-item.active {
+  background: var(--hmi-accent-soft);
+  border-color: var(--hmi-accent-line);
+}
+
+.doc-title {
+  grid-area: title;
+  font-size: var(--hmi-fs-2);
+  font-weight: 550;
+  color: var(--hmi-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-meta {
+  grid-area: meta;
+  display: flex;
+  gap: 0.5rem;
+  color: var(--hmi-text-3);
+  font-size: var(--hmi-fs-1);
+}
+
+.doc-status {
+  grid-area: status;
+  align-self: center;
+}
+
+.work-pane {
+  padding: 0.6rem 1rem 1rem;
+  min-inline-size: 0;
+}
+
+.preview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.preview-head h3 {
+  font-size: var(--hmi-fs-5);
+  font-weight: 650;
+}
+
+.sub-title {
+  font-size: var(--hmi-fs-3);
+  font-weight: 650;
+  margin-block: 0.9rem 0.4rem;
+}
+
+.chunk-collapse {
+  border: 1px solid var(--hmi-line);
+  border-radius: var(--hmi-radius);
+  overflow: hidden;
+}
+
+.chunk-title {
+  font-size: var(--hmi-fs-2);
+  color: var(--hmi-accent);
+}
+
+.chunk-content {
+  margin: 0;
+  font-size: var(--hmi-fs-2);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--hmi-text-2);
+}
+
+.full-text {
+  border: 1px solid var(--hmi-line);
+  border-radius: var(--hmi-radius);
+  padding: 0.7rem 0.85rem;
+  max-block-size: 420px;
+  overflow-y: auto;
+  font-size: var(--hmi-fs-2);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--hmi-text-2);
+  background: var(--hmi-bg-deep);
 }
 
 .search-row {
@@ -374,191 +480,82 @@ onMounted(refresh)
 }
 
 .query-input {
-  flex: 1;
-  min-width: 220px;
+  flex: 1 1 240px;
 }
 
 .cat-select {
-  width: 130px;
-}
-
-.topk {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.topk-label {
-  font-size: 0.78rem;
-  color: var(--muted);
-  white-space: nowrap;
+  inline-size: 130px;
 }
 
 .topk-select {
-  width: 96px;
+  inline-size: 92px;
 }
 
 .hits {
-  margin-top: 0.75rem;
+  margin-block-start: 0.75rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
 .hit {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--hmi-line);
+  border-radius: var(--hmi-radius);
+  padding: 0.55rem 0.7rem;
+  background: var(--hmi-surface);
 }
 
 .hit-head {
   display: flex;
-  gap: 0.75rem;
-  font-size: 0.75rem;
-  color: var(--muted);
+  gap: 0.6rem;
+  font-size: var(--hmi-fs-1);
+  color: var(--hmi-text-3);
   flex-wrap: wrap;
 }
 
 .hit-doc {
-  color: var(--accent);
+  color: var(--hmi-accent);
+}
+
+.hit-meta {
+  margin-inline-start: auto;
 }
 
 .hit-content {
-  margin: 0.4rem 0 0;
-  font-size: 0.8rem;
-  line-height: 1.5;
-  color: var(--text);
-}
-
-.preview-filters {
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.filter-field {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.filter-label {
-  font-size: 0.78rem;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.filter-select {
-  width: 170px;
-}
-
-.article-field {
-  flex: 1;
-  min-width: 240px;
-}
-
-.article-field .filter-select {
-  width: 100%;
-}
-
-.doc-meta-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-
-.doc-meta {
-  font-size: 0.75rem;
-  color: var(--muted);
-  margin: 0;
-}
-
-.doc-delete {
-  flex-shrink: 0;
-}
-
-.preview-sub {
-  font-size: 0.85rem;
-  margin: 0.9rem 0 0.5rem;
-}
-
-.preview-hint {
-  font-size: 0.72rem;
-  color: var(--muted);
-  font-weight: 400;
-}
-
-.chunk-collapse {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.chunk-title {
-  font-size: 0.78rem;
-  color: var(--accent-dim, var(--muted));
-}
-
-.chunk-content {
-  margin: 0;
-  font-size: 0.78rem;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.full-text {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.75rem 0.9rem;
-  max-height: 420px;
-  overflow-y: auto;
-  font-size: 0.8rem;
+  margin-block-start: 0.35rem;
+  font-size: var(--hmi-fs-2);
   line-height: 1.6;
+  color: var(--hmi-text-2);
   white-space: pre-wrap;
-  word-break: break-word;
 }
 
-.muted {
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.upload-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  width: 100%;
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 0.6rem;
 }
 
 .hint {
-  font-size: 0.72rem;
-  color: var(--muted);
+  color: var(--hmi-text-3);
+  font-size: var(--hmi-fs-1);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 900px) {
+  .kb-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .doc-pane {
+    position: static;
+    max-block-size: 320px;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
   .search-row > * {
-    width: 100%;
-  }
-
-  .cat-select,
-  .topk-select {
-    width: 100%;
-  }
-
-  .topk {
-    justify-content: space-between;
-  }
-
-  .filter-field {
-    width: 100%;
-  }
-
-  .filter-select {
-    flex: 1;
-    width: auto;
+    inline-size: 100%;
   }
 }
 </style>

@@ -30,6 +30,13 @@ export function setAuth(token: string, user: AuthUser): void {
   saveToken(token, user)
 }
 
+/** 局部更新当前用户并持久化（隐私开关等即时生效字段）。 */
+export function patchStoredUser(patch: Partial<AuthUser>): void {
+  if (!auth.user) return
+  auth.user = { ...auth.user, ...patch }
+  saveToken(auth.token, auth.user)
+}
+
 export function logout(): void {
   auth.token = ''
   auth.user = null

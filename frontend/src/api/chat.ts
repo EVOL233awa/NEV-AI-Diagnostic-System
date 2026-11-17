@@ -2,13 +2,20 @@
  * 诊断会话 API + SSE 流式解析。
  * send/answers 走 fetch POST + ReadableStream（axios 不便处理流），其余走 http 实例。
  */
-import { TOKEN_KEY, getApiBase, http } from './client'
+import { TOKEN_KEY, getApiBase, handleAuthExpired, http } from './client'
 
 export interface SessionInfo {
   id: number
   title: string
   status: string
   has_pending: boolean
+  vehicle?: {
+    id: number
+    brand: string
+    model_name: string
+    plate_no: string
+    mileage: number | null
+  } | null
 }
 
 export interface DiagHypothesis {
@@ -104,6 +111,10 @@ export async function streamChat(
   }
   if (!resp.ok || !resp.body) {
     clearTimeout(idleTimer)
+    if (resp.status === 401) {
+      handleAuthExpired()
+      throw new Error('登录已过期，请重新登录')
+    }
     let detail = `HTTP ${resp.status}`
     try {
       const err = (await resp.json()) as { detail?: string }

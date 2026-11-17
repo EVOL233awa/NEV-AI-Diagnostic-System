@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.db.models import AuditLog, Case, Message, Session as ChatSession, User
+from backend.db.models import Appointment, AuditLog, Case, Message, Session as ChatSession, User
 from backend.security import hash_password
 from backend.rag import ingest
 
@@ -49,6 +49,26 @@ def test_kb_role_matrix(client, staff_headers, admin_headers) -> None:
     assert client.delete("/api/kb/documents/999999", headers=admin_headers).status_code == 404
 
 
+def test_kb_upload_size_limits(client, admin_headers, monkeypatch) -> None:
+    import backend.api.kb as kb_api
+
+    monkeypatch.setattr(kb_api, "MAX_UPLOAD_BYTES", 16)
+    r = client.post(
+        "/api/kb/documents",
+        headers=admin_headers,
+        files={"file": ("a.txt", b"x" * 17, "text/plain")},
+    )
+    assert r.status_code == 413
+
+    monkeypatch.setattr(kb_api, "MAX_TEXT_CHARS", 10)
+    r = client.post(
+        "/api/kb/documents",
+        headers=admin_headers,
+        data={"markdown_text": "x" * 11},
+    )
+    assert r.status_code == 413
+
+
 def test_password_change_roundtrip(client, db_session) -> None:
     r = client.post("/api/auth/login", json={"username": "staff001", "password": "staff001"})
     token = r.json()["token"]
@@ -85,7 +105,7 @@ def test_session_isolation_between_users(client, owner_headers, staff_headers) -
 # ---------- 案例回流全流程（数据飞轮） ----------
 
 
-def _make_diag_session(db, owner: User) -> ChatSession:
+def _make_diag_session(db, owner: User, *, with_appointment: bool = True) -> ChatSession:
     session = ChatSession(tenant_id=1, user_id=owner.id, title="案例测试会话", channel="owner")
     db.add(session)
     db.flush()
@@ -100,6 +120,10 @@ def _make_diag_session(db, owner: User) -> ChatSession:
             "pending_checks": ["确认充电桩型号"],
         },
     ))
+    if with_appointment:
+        db.add(Appointment(
+            tenant_id=1, owner_id=owner.id, session_id=session.id, status="completed",
+        ))
     db.commit()
     return session
 
@@ -151,6 +175,55 @@ def test_case_create_full_flow(client, staff_headers, db_session, monkeypatch) -
     # 清理：删掉案例文档，避免污染同进程后续检索断言
     from backend.rag.ingest import delete_document
     delete_document(db_session, doc_id)
+
+
+def test_case_requires_completed_appointment_and_owner_consent(
+    client, staff_headers, db_session, monkeypatch
+) -> None:
+    """案例沉淀不得绕过车主隐私开关：车主会话需已完成工单 + 允许店员看对话。"""
+    monkeypatch.setattr(ingest, "Embedder", _FakeEmbedder)
+    owner = db_session.query(User).filter_by(username="user001").first()
+    owner.privacy_share_dialog = True
+    db_session.commit()
+    session = _make_diag_session(db_session, owner, with_appointment=False)
+
+    r = client.post("/api/cases", headers=staff_headers, json={"session_id": session.id})
+    assert r.status_code == 409 and "已完成工单" in r.json()["detail"]
+
+    db_session.add(Appointment(
+        tenant_id=1, owner_id=owner.id, session_id=session.id, status="completed",
+    ))
+    owner.privacy_share_dialog = False
+    db_session.commit()
+    r = client.post("/api/cases", headers=staff_headers, json={"session_id": session.id})
+    assert r.status_code == 403 and "未授权" in r.json()["detail"]
+
+    owner.privacy_share_dialog = True
+    db_session.commit()
+    r = client.post("/api/cases", headers=staff_headers, json={"session_id": session.id})
+    assert r.status_code == 200, r.text
+    from backend.rag.ingest import delete_document
+    delete_document(db_session, r.json()["kb_document_id"])
+
+
+def test_staff_channel_case_does_not_require_owner_appointment(
+    client, staff_headers, db_session, monkeypatch
+) -> None:
+    """店员自建店内诊断会话不含车主对话，按原有流程可沉淀。"""
+    monkeypatch.setattr(ingest, "Embedder", _FakeEmbedder)
+    staff = db_session.query(User).filter_by(username="staff001").first()
+    session = ChatSession(tenant_id=1, user_id=staff.id, title="店内诊断", channel="staff")
+    db_session.add(session)
+    db_session.flush()
+    db_session.add(Message(
+        tenant_id=1, session_id=session.id, role="assistant", content="结论",
+        diag_json={"severity": "green", "summary": "店内检查正常", "hypotheses": []},
+    ))
+    db_session.commit()
+    r = client.post("/api/cases", headers=staff_headers, json={"session_id": session.id})
+    assert r.status_code == 200, r.text
+    from backend.rag.ingest import delete_document
+    delete_document(db_session, r.json()["kb_document_id"])
 
 
 def bm25_hits(db, query: str) -> list[tuple[int, float]]:

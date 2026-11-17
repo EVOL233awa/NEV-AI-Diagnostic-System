@@ -1,0 +1,95 @@
+/* 打印主题：浅色、省墨、分页可控。 */
+@media print {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #111 !important;
+    min-height: auto;
+  }
+
+  body {
+    font-size: 11pt;
+  }
+
+  .shell__nav,
+  .shell__topbar,
+  .shell__tabbar,
+  .no-print,
+  .el-message,
+  .el-overlay,
+  .skip-link {
+    display: none !important;
+  }
+
+  .shell__content,
+  .page {
+    max-inline-size: none;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+  }
+
+  .hmi-card,
+  .el-card {
+    background: #fff !important;
+    border: 1px solid #c8c8c8 !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+    margin-block-end: 8pt;
+  }
+
+  .el-card__header {
+    background: #f2f2f2 !important;
+    color: #111 !important;
+    border-block-end: 1px solid #c8c8c8 !important;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  .hmi-section-title {
+    color: #111 !important;
+  }
+
+  p,
+  li,
+  td,
+  th,
+  .hmi-sub,
+  .hmi-muted {
+    color: #222 !important;
+  }
+
+  a {
+    color: #111 !important;
+    text-decoration: underline;
+  }
+
+  table {
+    border-collapse: collapse;
+    inline-size: 100%;
+  }
+
+  th,
+  td {
+    border: 1px solid #bbb !important;
+    padding: 4pt 6pt !important;
+  }
+
+  .page-break {
+    break-before: page;
+  }
+
+  .avoid-break {
+    break-inside: avoid;
+  }
+
+  @page {
+    margin: 14mm 12mm;
+  }
+}
